@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WebMirror</string>
+    <string name="url_hint">输入网站 URL（例如 https://example.com）</string>
+    <string name="start_download">开始下载</string>
+    <string name="download_progress">下载进度</string>
+    <string name="files_downloaded">已下载文件</string>
+    <string name="settings">设置</string>
+    <string name="max_depth">最大递归深度</string>
+    <string name="same_domain_only">仅同域名</string>
+    <string name="download_path">下载路径</string>
+    <string name="open_folder">打开文件夹</string>
+    <string name="cancel">取消</string>
+    <string name="status_idle">准备就绪</string>
+    <string name="status_downloading">正在下载…</string>
+    <string name="status_completed">下载完成</string>
+    <string name="status_error">出错</string>
+    <string name="permission_required">需要存储权限才能保存文件</string>
+    <string name="invalid_url">请输入有效的 URL</string>
+</resources>
