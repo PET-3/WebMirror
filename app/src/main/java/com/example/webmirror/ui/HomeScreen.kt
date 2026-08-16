@@ -420,6 +420,7 @@ fun HomeScreen(
                                 EngineStatus.Completed -> stringResource(R.string.status_completed)
                                 EngineStatus.Error -> stringResource(R.string.status_error)
                                 EngineStatus.Cancelled -> "已取消"
+                                EngineStatus.Paused -> "已暂停"
                             },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
