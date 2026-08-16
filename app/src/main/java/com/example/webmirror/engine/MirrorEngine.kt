@@ -115,7 +115,7 @@ class MirrorEngine(context: Context) {
 
     suspend fun startWithConfig(
         config: MirrorConfig,
-        outputDir: File,
+        outDir: File,
         projectName: String = "mirror",
         runMode: RunMode = RunMode.FRESH
     ) = withContext(Dispatchers.IO) {
@@ -144,7 +144,8 @@ class MirrorEngine(context: Context) {
                 return@withContext
             }
 
-        this.outputDir = outputDir.also { it.mkdirs() }
+        // 使用 outDir 然后赋值到成员 outputDir
+        this@MirrorEngine.outputDir = outDir.also { it.mkdirs() }
         queue.config = config
         queue.seedHost = UrlNormalizer.hostOf(normalized)
         activeConfig = config
@@ -161,7 +162,7 @@ class MirrorEngine(context: Context) {
             val origin = robots.originOf(normalized)
             if (origin != null && robots.get(origin) == null) {
                 try {
-                    val robotsFile = File(outputDir, ".robots_cache.txt")
+                    val robotsFile = File(this@MirrorEngine.outputDir, ".robots_cache.txt")
                     val rr = fetcher.fetchToFile(robots.robotsUrl(origin), robotsFile)
                     if (rr.success && robotsFile.exists()) {
                         robots.put(origin, robots.parse(robotsFile.readText()))
@@ -175,7 +176,7 @@ class MirrorEngine(context: Context) {
         val project = ProjectEntity(
             name = projectName,
             startUrl = normalized,
-            rootPath = outputDir.absolutePath,
+            rootPath = this@MirrorEngine.outputDir?.absolutePath ?: outDir.absolutePath,
             maxDepth = config.limits.maxDepth,
             sameDomainOnly = config.domainPolicy.mode == DomainMode.SAME_HOST,
             maxWorkers = config.maxWorkers.coerceIn(1, 16),
@@ -225,7 +226,7 @@ class MirrorEngine(context: Context) {
 
     /** Resume after app kill / pause: requeue DOWNLOADING and continue. */
     suspend fun resume(
-        outputDir: File,
+        outDir: File,
         maxWorkers: Int = 4,
         maxDepth: Int = 3,
         maxRetries: Int = 3,
@@ -235,7 +236,7 @@ class MirrorEngine(context: Context) {
         stopInternal()
         cancelled = false
         paused = false
-        this.outputDir = outputDir
+        this@MirrorEngine.outputDir = outDir
         queue.recoverInterrupted()
 
         val host = baseHost
@@ -388,7 +389,7 @@ class MirrorEngine(context: Context) {
             return
         }
 
-        // If redirected, also register final URL so path mapping stays consistent
+        // If redirected, also register final URL so path mapping stays一致
         val finalNorm = result.finalUrl?.let { UrlNormalizer.normalize(it) }
         if (finalNorm != null && finalNorm != normalizedUrl) {
             queue.enqueue(finalNorm, depth, parentUrl = normalizedUrl)
@@ -461,6 +462,16 @@ class MirrorEngine(context: Context) {
         return ct.contains("text/html") || ct.contains("text/css") ||
                 p.endsWith(".html") || p.endsWith(".htm") || p.endsWith(".css") ||
                 !p.contains('.')
+    }
+
+    // 临时占位实现：避免未定义引用导致编译失败。后续应实现真正的重写逻辑：
+    // - 从 DB 获取 normalizedUrl -> localPath 映射（已下载的资源）
+    // - 对 HTML/CSS 做 OfflineLinkRewriter.rewriteHtml / rewriteCss 调用并写回文件
+    private fun maybeRewriteFile(file: File, rel: String, parseBase: String, contentType: String?) {
+        val cfg = activeConfig
+        if (cfg?.rewriteLinks != true) return
+        // TODO: 实现完整重写：从 resourceDao 读取映射，构造 urlToLocal map，调用 OfflineLinkRewriter，写回文件。
+        // 暂时 no-op 防止阻塞主流程。
     }
 
     private suspend fun refreshStats(status: EngineStatus) {
