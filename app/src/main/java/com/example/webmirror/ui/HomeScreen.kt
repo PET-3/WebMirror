@@ -443,27 +443,40 @@ fun HomeScreen(
                                 )
                             }
                         }
-                        Text(
-                           text = when (state.stats.status) {
-                           EngineStatus.Idle -> stringResource(R.string.status_idle)
-                           EngineStatus.Running -> stringResource(R.string.status_downloading) 
-                           EngineStatus.Paused -> "已暂停" EngineStatus.Completed -> stringResource(R.string.status_completed) 
-                           EngineStatus.Error -> stringResource(R.string.status_error) EngineStatus.Cancelled -> "已取消" }
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                   Text(
+    text = when (state.stats.status) {
+        EngineStatus.Idle -> stringResource(R.string.status_idle)
+        EngineStatus.Running -> stringResource(R.string.status_downloading)
+        EngineStatus.Paused -> "已暂停"
+        EngineStatus.Completed -> stringResource(R.string.status_completed)
+        EngineStatus.Error -> stringResource(R.string.status_error)
+        EngineStatus.Cancelled -> "已取消"
+    },
+    style = MaterialTheme.typography.titleMedium,
+    fontWeight = FontWeight.SemiBold
+)
 
-                    if (state.stats.status == EngineStatus.Running) {
-                        LinearProgressIndicator(
-                            modifier = Modifier.fillMaxWidth(),
-                            trackColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        Text(
-                            text = "队列 ${state.stats.queued} · 已下载 ${state.stats.downloaded} · 失败 ${state.stats.failed} · 跳过 ${state.stats.skipped} · 共 ${state.stats.total}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+if (state.stats.status == EngineStatus.Running) {
+    LinearProgressIndicator(
+        modifier = Modifier.fillMaxWidth(),
+        trackColor = MaterialTheme.colorScheme.surfaceVariant
+    )
+    Text(
+        text = "队列 ${state.stats.queued} · 已下载 ${state.stats.downloaded} · 失败 ${state.stats.failed} · 跳过 ${state.stats.skipped} · 共 ${state.stats.total}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    if (state.stats.currentUrl.isNotBlank()) {
+        Text(
+            text = state.stats.currentUrl,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
                         if (state.stats.currentUrl.isNotBlank()) {
                             Text(
                                 text = state.stats.currentUrl,
