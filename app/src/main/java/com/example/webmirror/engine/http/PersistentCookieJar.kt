@@ -9,8 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Simple persistent cookie jar (SharedPreferences).
- * Enough for session continuity across runs; not a full browser store.
+ * Persistent cookie jar (SharedPreferences). Fixed for OkHttp 4 API.
  */
 class PersistentCookieJar(context: Context) : CookieJar {
 
@@ -38,8 +37,9 @@ class PersistentCookieJar(context: Context) : CookieJar {
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val host = url.host
         val now = System.currentTimeMillis()
-        val list = memory[host]?.filter { it.expiresAt > now && (it.hostOnly || host.endsWith(it.domain)) }
-            ?: emptyList()
+        val list = memory[host]?.filter {
+            it.expiresAt > now
+        } ?: emptyList()
         return list.filter { url.encodedPath.startsWith(it.path) || it.path == "/" }
     }
 
@@ -88,10 +88,14 @@ class PersistentCookieJar(context: Context) : CookieJar {
                     .value(o.getString("value"))
                     .path(o.optString("path", "/"))
                     .expiresAt(if (expires > 0) expires else now + 86400_000L * 30)
-                if (o.optBoolean("hostOnly", true)) {
-                    builder.hostOnlyDomain(domain)
-                } else {
-                    builder.domain(domain)
+                try {
+                    if (o.optBoolean("hostOnly", true)) {
+                        builder.hostOnlyDomain(domain)
+                    } else {
+                        builder.domain(domain.trimStart('.'))
+                    }
+                } catch (_: Exception) {
+                    builder.domain(domain.trimStart('.'))
                 }
                 if (o.optBoolean("secure", false)) builder.secure()
                 if (o.optBoolean("httpOnly", false)) builder.httpOnly()

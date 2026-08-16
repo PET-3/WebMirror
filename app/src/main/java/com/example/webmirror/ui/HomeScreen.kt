@@ -45,10 +45,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
+import android.content.Intent
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.Modifier.modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -71,6 +75,13 @@ fun HomeScreen(
     val state by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
     val isDownloading = state.stats.status == EngineStatus.Running || state.stats.status == EngineStatus.Paused
+    val context = LocalContext.current
+    LaunchedEffect(state.toastMessage) {
+        state.toastMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearToast()
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -359,6 +370,25 @@ fun HomeScreen(
                             }
                         }
                     }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { viewModel.exportLogs(includeAll = true) },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("导出日志")
+                        }
+                    }
+                    state.lastExportPath?.let { path ->
+                        Text(
+                            text = "日志路径：$path",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -420,7 +450,6 @@ fun HomeScreen(
                                 EngineStatus.Completed -> stringResource(R.string.status_completed)
                                 EngineStatus.Error -> stringResource(R.string.status_error)
                                 EngineStatus.Cancelled -> "已取消"
-                                EngineStatus.Paused -> "已暂停"
                             },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold

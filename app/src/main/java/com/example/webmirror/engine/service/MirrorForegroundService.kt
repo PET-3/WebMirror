@@ -60,35 +60,35 @@ class MirrorForegroundService : Service() {
                 return START_STICKY
             }
             else -> {
-                val url = intent?.getStringExtra(EXTRA_URL) ?: return START_NOT_STICKY
-                val dir = intent.getStringExtra(EXTRA_DIR) ?: return START_NOT_STICKY
-                val depth = intent.getIntExtra(EXTRA_DEPTH, 10)
-                val workers = intent.getIntExtra(EXTRA_WORKERS, 4)
-                val sameDomain = intent.getBooleanExtra(EXTRA_SAME_DOMAIN, true)
-                val mode = RunMode.valueOf(intent.getStringExtra(EXTRA_MODE) ?: RunMode.FRESH.name)
-                val respectRobots = intent.getBooleanExtra(EXTRA_ROBOTS, true)
-
-                startForeground(NOTIF_ID, buildNotification("准备中…", "0 / 0"))
+                // UI owns the engine start (avoids double-start / silent failure).
+                // Service only keeps a foreground notification and mirrors stats.
+                startForeground(NOTIF_ID, buildNotification("镜像进行中", "准备中…"))
                 observeStats()
-
-                val config = MirrorConfig(
-                    startUrl = url,
-                    maxWorkers = workers,
-                    domainPolicy = DomainPolicy(
-                        mode = if (sameDomain) DomainMode.SAME_HOST else DomainMode.EVERYWHERE
-                    ),
-                    limits = CrawlLimits(maxDepth = depth),
-                    // robots flag stored via engine active config extension — use domain only here;
-                    // full robots toggled in repository/engine config field below
-                )
-
-                scope.launch(Dispatchers.IO) {
-                    // Pass robots via a side channel on repository if available
-                    repo.setRespectRobots(respectRobots)
-                    when (mode) {
-                        RunMode.FRESH -> repo.startMirror(config, File(dir))
-                        RunMode.CONTINUE -> repo.continueMirror(config, File(dir))
-                        RunMode.UPDATE -> repo.updateMirror(config, File(dir))
+                // Optional: if UI did not start engine (legacy), start here when EXTRA_RUN_ENGINE=true
+                if (intent?.getBooleanExtra(EXTRA_RUN_ENGINE, false) == true) {
+                    val url = intent.getStringExtra(EXTRA_URL) ?: return START_STICKY
+                    val dir = intent.getStringExtra(EXTRA_DIR) ?: return START_STICKY
+                    val depth = intent.getIntExtra(EXTRA_DEPTH, 10)
+                    val workers = intent.getIntExtra(EXTRA_WORKERS, 4)
+                    val sameDomain = intent.getBooleanExtra(EXTRA_SAME_DOMAIN, true)
+                    val mode = RunMode.valueOf(intent.getStringExtra(EXTRA_MODE) ?: RunMode.FRESH.name)
+                    val respectRobots = intent.getBooleanExtra(EXTRA_ROBOTS, true)
+                    val config = MirrorConfig(
+                        startUrl = url,
+                        maxWorkers = workers,
+                        domainPolicy = DomainPolicy(
+                            mode = if (sameDomain) DomainMode.SAME_HOST else DomainMode.EVERYWHERE
+                        ),
+                        limits = CrawlLimits(maxDepth = depth),
+                        respectRobots = respectRobots
+                    )
+                    scope.launch(Dispatchers.IO) {
+                        repo.setRespectRobots(respectRobots)
+                        when (mode) {
+                            RunMode.FRESH -> repo.startMirror(config, File(dir))
+                            RunMode.CONTINUE -> repo.continueMirror(config, File(dir))
+                            RunMode.UPDATE -> repo.updateMirror(config, File(dir))
+                        }
                     }
                 }
             }
