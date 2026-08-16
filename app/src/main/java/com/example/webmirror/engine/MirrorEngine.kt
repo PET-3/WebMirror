@@ -87,6 +87,9 @@ class MirrorEngine(context: Context) {
 
     private var currentProject: ProjectEntity? = null
     private var outputDir: File? = null
+    private var activeConfig: MirrorConfig? = null
+
+
 
     /**
      * Start a new mirror (clears previous resource rows for simplicity in Phase 1).
@@ -490,7 +493,7 @@ class MirrorEngine(context: Context) {
             status = status
         )
     }
-
+//
     private suspend fun <T> coroutineScopeSafe(block: suspend kotlinx.coroutines.CoroutineScope.() -> T): T {
         return kotlinx.coroutines.coroutineScope(block)
     }
