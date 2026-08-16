@@ -444,13 +444,11 @@ fun HomeScreen(
                             }
                         }
                         Text(
-                            text = when (state.stats.status) {
-                                EngineStatus.Idle -> stringResource(R.string.status_idle)
-                                EngineStatus.Running -> stringResource(R.string.status_downloading)
-                                EngineStatus.Completed -> stringResource(R.string.status_completed)
-                                EngineStatus.Error -> stringResource(R.string.status_error)
-                                EngineStatus.Cancelled -> "已取消"
-                            },
+                           text = when (state.stats.status) {
+                           EngineStatus.Idle -> stringResource(R.string.status_idle)
+                           EngineStatus.Running -> stringResource(R.string.status_downloading) 
+                           EngineStatus.Paused -> "已暂停" EngineStatus.Completed -> stringResource(R.string.status_completed) 
+                           EngineStatus.Error -> stringResource(R.string.status_error) EngineStatus.Cancelled -> "已取消" }
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
