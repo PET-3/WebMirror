@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -25,6 +23,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Info
@@ -34,11 +33,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -50,7 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.Modifier.modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -60,17 +58,19 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.webmirror.R
-import com.example.webmirror.downloader.DownloadStatus
+import com.example.webmirror.engine.EngineStatus
+import com.example.webmirror.engine.model.RunMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: MainViewModel,
+    onPickDirectory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
-    val isDownloading = state.progress.status == DownloadStatus.Downloading
+    val isDownloading = state.stats.status == EngineStatus.Running || state.stats.status == EngineStatus.Paused
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -99,7 +99,7 @@ fun HomeScreen(
         ) {
             Spacer(modifier = Modifier.height(4.dp))
 
-            // URL Input Card (Shizuku-style elevated card)
+            // URL Input Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -154,7 +154,7 @@ fun HomeScreen(
                         Button(
                             onClick = {
                                 focusManager.clearFocus()
-                                viewModel.startDownload()
+                                viewModel.startDownload(RunMode.FRESH)
                             },
                             enabled = !isDownloading && state.url.isNotBlank(),
                             modifier = Modifier.weight(1f),
@@ -224,8 +224,8 @@ fun HomeScreen(
                     Slider(
                         value = state.maxDepth.toFloat(),
                         onValueChange = { viewModel.updateMaxDepth(it.toInt()) },
-                        valueRange = 0f..5f,
-                        steps = 4,
+                        valueRange = 0f..50f,
+                        steps = 49,
                         enabled = !isDownloading
                     )
 
@@ -244,6 +244,121 @@ fun HomeScreen(
                             enabled = !isDownloading
                         )
                     }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "遵守 robots.txt",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Switch(
+                            checked = state.respectRobots,
+                            onCheckedChange = viewModel::updateRespectRobots,
+                            enabled = !isDownloading
+                        )
+                    }
+
+                    Text(
+                        text = "并发数：${state.maxWorkers}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Slider(
+                        value = state.maxWorkers.toFloat(),
+                        onValueChange = { viewModel.updateMaxWorkers(it.toInt()) },
+                        valueRange = 1f..16f,
+                        steps = 14,
+                        enabled = !isDownloading
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { viewModel.startDownload(RunMode.CONTINUE) },
+                            enabled = !isDownloading && state.url.isNotBlank(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("继续") }
+                        OutlinedButton(
+                            onClick = { viewModel.startDownload(RunMode.UPDATE) },
+                            enabled = !isDownloading && state.url.isNotBlank(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("更新") }
+                        if (state.stats.status == EngineStatus.Running) {
+                            OutlinedButton(
+                                onClick = viewModel::pauseDownload,
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("暂停") }
+                        }
+                        if (state.stats.status == EngineStatus.Paused) {
+                            OutlinedButton(
+                                onClick = viewModel::resumeDownload,
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("恢复") }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "链接重写（离线可浏览）",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = "类似 HTTrack，把站内链接改成相对路径",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = state.rewriteLinks,
+                            onCheckedChange = viewModel::updateRewriteLinks,
+                            enabled = !isDownloading
+                        )
+                    }
+
+                    // Directory picker
+                    Text(
+                        text = "保存目录",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = state.downloadDirDisplay,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = onPickDirectory,
+                            enabled = !isDownloading,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.size(6.dp))
+                            Text("选择目录")
+                        }
+                        if (state.treeUri != null) {
+                            OutlinedButton(
+                                onClick = viewModel::clearTreeUri,
+                                enabled = !isDownloading,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("恢复默认")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -252,9 +367,9 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = when (state.progress.status) {
-                        DownloadStatus.Completed -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                        DownloadStatus.Error -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                    containerColor = when (state.stats.status) {
+                        EngineStatus.Completed -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                        EngineStatus.Error -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
                         else -> MaterialTheme.colorScheme.surfaceContainerLow
                     }
                 )
@@ -269,21 +384,21 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        when (state.progress.status) {
-                            DownloadStatus.Downloading -> {
+                        when (state.stats.status) {
+                            EngineStatus.Running -> {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
                                     strokeWidth = 2.dp
                                 )
                             }
-                            DownloadStatus.Completed -> {
+                            EngineStatus.Completed -> {
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                             }
-                            DownloadStatus.Error -> {
+                            EngineStatus.Error -> {
                                 Icon(
                                     imageVector = Icons.Default.Error,
                                     contentDescription = null,
@@ -299,31 +414,31 @@ fun HomeScreen(
                             }
                         }
                         Text(
-                            text = when (state.progress.status) {
-                                DownloadStatus.Idle -> stringResource(R.string.status_idle)
-                                DownloadStatus.Downloading -> stringResource(R.string.status_downloading)
-                                DownloadStatus.Completed -> stringResource(R.string.status_completed)
-                                DownloadStatus.Error -> stringResource(R.string.status_error)
-                                DownloadStatus.Cancelled -> "已取消"
+                            text = when (state.stats.status) {
+                                EngineStatus.Idle -> stringResource(R.string.status_idle)
+                                EngineStatus.Running -> stringResource(R.string.status_downloading)
+                                EngineStatus.Completed -> stringResource(R.string.status_completed)
+                                EngineStatus.Error -> stringResource(R.string.status_error)
+                                EngineStatus.Cancelled -> "已取消"
                             },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
 
-                    if (state.progress.status == DownloadStatus.Downloading) {
+                    if (state.stats.status == EngineStatus.Running) {
                         LinearProgressIndicator(
                             modifier = Modifier.fillMaxWidth(),
                             trackColor = MaterialTheme.colorScheme.surfaceVariant
                         )
                         Text(
-                            text = "已发现 ${state.progress.totalDiscovered} 个资源 · 已保存 ${state.progress.downloadedCount} 个",
+                            text = "队列 ${state.stats.queued} · 已下载 ${state.stats.downloaded} · 失败 ${state.stats.failed} · 跳过 ${state.stats.skipped} · 共 ${state.stats.total}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (state.progress.currentUrl.isNotBlank()) {
+                        if (state.stats.currentUrl.isNotBlank()) {
                             Text(
-                                text = state.progress.currentUrl,
+                                text = state.stats.currentUrl,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 maxLines = 2,
@@ -333,15 +448,15 @@ fun HomeScreen(
                         }
                     }
 
-                    if (state.progress.status == DownloadStatus.Completed ||
-                        state.progress.status == DownloadStatus.Error ||
-                        state.progress.status == DownloadStatus.Cancelled
+                    if (state.stats.status == EngineStatus.Completed ||
+                        state.stats.status == EngineStatus.Error ||
+                        state.stats.status == EngineStatus.Cancelled
                     ) {
                         Text(
-                            text = "共保存 ${state.progress.downloadedCount} 个文件",
+                            text = "共保存 ${state.stats.downloaded} 个文件",
                             style = MaterialTheme.typography.bodyMedium
                         )
-                        state.progress.errorMessage?.let {
+                        state.stats.errorMessage?.let {
                             Text(
                                 text = it,
                                 style = MaterialTheme.typography.bodySmall,
@@ -350,7 +465,6 @@ fun HomeScreen(
                         }
                     }
 
-                    // Download path
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -362,7 +476,7 @@ fun HomeScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = state.downloadDir,
+                            text = state.downloadDirDisplay,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                             maxLines = 2,
@@ -375,7 +489,7 @@ fun HomeScreen(
 
             // Recent files
             AnimatedVisibility(
-                visible = state.progress.recentFiles.isNotEmpty(),
+                visible = false,
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
@@ -397,7 +511,7 @@ fun HomeScreen(
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
-                        state.progress.recentFiles.reversed().forEach { name ->
+                        emptyList<String>().reversed().forEach { name ->
                             Text(
                                 text = "• $name",
                                 style = MaterialTheme.typography.bodySmall,
@@ -425,15 +539,16 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "使用提示",
+                        text = "升级说明（更接近 HTTrack）",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "• 文件会按原网站目录结构保存到应用专属目录\n" +
-                                "• 深度 0 只下载入口页，深度 2~3 适合大多数站点\n" +
-                                "• 建议开启「仅同域名」避免抓取外链\n" +
-                                "• 下载完成后可用文件管理器打开对应文件夹",
+                        text = "• 链接重写：下载完成后把站内链接改成相对路径，离线可正常跳转\n" +
+                                "• 资源发现增强：解析 CSS 的 url() 与 @import\n" +
+                                "• 有限并行下载 + 自动重试\n" +
+                                "• 可自选保存目录（系统文件夹选择器）\n" +
+                                "• 深度 2~3 + 仅同域名 适合大多数静态站",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
