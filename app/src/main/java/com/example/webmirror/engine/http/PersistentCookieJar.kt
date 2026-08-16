@@ -4,6 +4,7 @@ import android.content.Context
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -48,7 +49,7 @@ class PersistentCookieJar(context: Context) : CookieJar {
     }
 
     fun importFromHeader(setCookieLines: List<String>, url: String) {
-        val httpUrl = HttpUrl.parse(url) ?: return
+        val httpUrl = url.toHttpUrlOrNull() ?: return
         val cookies = setCookieLines.mapNotNull { Cookie.parse(httpUrl, it) }
         if (cookies.isNotEmpty()) saveFromResponse(httpUrl, cookies)
     }
