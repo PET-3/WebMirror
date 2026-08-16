@@ -1,21 +1,20 @@
 package com.example.webmirror.engine.model
 
-/**
- * HTTrack-style include / exclude rules evaluated before enqueue.
- *
- * Pattern syntax (simplified):
- * - Exact substring match if no wildcards
- * - `*` matches any sequence
- * - Rules starting with `+` are includes, `-` are excludes
- * - If any include rules exist, URL must match at least one include
- * - Exclude always wins over include
- *
- * Examples:
- * +*/docs/*
- * -*/login/*
- * -*.zip
- * -*.mp4
- */
+// HTTrack-style include / exclude rules evaluated before enqueue.
+//
+// Pattern syntax (simplified):
+// - Exact substring match if no wildcards
+// - `*` matches any sequence
+// - Rules starting with `+` are includes, `-` are excludes
+// - If any include rules exist, URL must match at least one include
+// - Exclude always wins over include
+//
+// Examples:
+// +*/docs/*
+// -*/login/*
+// -*.zip
+// -*.mp4
+//
 data class UrlFilter(
     val rules: List<String> = emptyList()
 ) {
