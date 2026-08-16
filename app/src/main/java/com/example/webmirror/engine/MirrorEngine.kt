@@ -86,6 +86,9 @@ class MirrorEngine(context: Context) {
     private var currentProject: ProjectEntity? = null
     private var outputDir: File? = null
 
+    // 新增：保存当前运行时配置（nullable），startWithConfig 中会赋值
+    private var activeConfig: MirrorConfig? = null
+
     /**
      * Start a new mirror (clears previous resource rows for simplicity in Phase 1).
      * Full multi-project isolation comes in later phases.
