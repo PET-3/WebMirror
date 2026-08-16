@@ -209,6 +209,10 @@ class MirrorEngine(context: Context) {
                     baseHost = baseHost
                 )
                 if (!cancelled) {
+                    // HTTrack-style: final offline link rewrite after all files are present
+                    if (config.rewriteLinks) {
+                        rewriteAllOffline()
+                    }
                     projectDao.updateStatus(pid, "COMPLETED")
                     refreshStats(EngineStatus.Completed)
                 }
@@ -481,20 +485,74 @@ class MirrorEngine(context: Context) {
                 !p.contains('.')
     }
 
-    private fun maybeRewriteFile(file: File, rel: String, baseUrl: String, contentType: String?) {
+    /**
+     * Incremental rewrite while crawling (best-effort; final pass is authoritative).
+     */
+    private suspend fun maybeRewriteFile(file: File, rel: String, baseUrl: String, contentType: String?) {
         try {
+            val cfg = activeConfig
+            if (cfg != null && !cfg.rewriteLinks) return
             val ct = contentType?.lowercase().orEmpty()
             val p = rel.lowercase()
-            // 只对可能为文本/HTML/CSS 的文件尝试重写，避免处理二进制
             if (!(ct.contains("text") || p.endsWith(".html") || p.endsWith(".htm") || p.endsWith(".css"))) {
                 return
             }
-            // TODO: 若存在 OfflineLinkRewriter 的真实 API，请在此处调用：
-            // OfflineLinkRewriter.rewrite(file, baseUrl, resourceDao)
-            // 目前作为 no-op 占位以保证编译通过
+            val mappings = resourceDao.allDownloadedMappings()
+            if (mappings.isEmpty()) return
+            val urlToLocal = mappings.associate { it.normalized_url to it.local_path }
+            val text = file.readText(Charsets.UTF_8)
+            val rewritten = if (p.endsWith(".css") || ct.contains("text/css")) {
+                OfflineLinkRewriter.rewriteCss(text, baseUrl, rel, urlToLocal)
+            } else {
+                OfflineLinkRewriter.rewriteHtml(text, baseUrl, rel, urlToLocal)
+            }
+            if (rewritten != text) {
+                file.writeText(rewritten, Charsets.UTF_8)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "rewrite failed for $rel: ${e.message}")
         }
+    }
+
+    /**
+     * Full offline rewrite pass (HTTrack-like): after all resources are on disk,
+     * rewrite every HTML/CSS so links become relative local paths.
+     */
+    private suspend fun rewriteAllOffline() {
+        val dir = outputDir ?: return
+        logger.i("MirrorEngine", "offline rewrite pass starting…")
+        val mappings = resourceDao.allDownloadedMappings()
+        if (mappings.isEmpty()) {
+            logger.i("MirrorEngine", "offline rewrite: no mappings")
+            return
+        }
+        val urlToLocal = mappings.associate { it.normalized_url to it.local_path }
+        var rewrittenCount = 0
+        for (pair in mappings) {
+            if (cancelled) break
+            val rel = pair.local_path
+            val lower = rel.lowercase()
+            val isHtml = lower.endsWith(".html") || lower.endsWith(".htm") || !rel.contains('.')
+            val isCss = lower.endsWith(".css")
+            if (!isHtml && !isCss) continue
+            val file = File(dir, rel)
+            if (!file.isFile) continue
+            try {
+                val text = file.readText(Charsets.UTF_8)
+                val out = if (isCss) {
+                    OfflineLinkRewriter.rewriteCss(text, pair.normalized_url, rel, urlToLocal)
+                } else {
+                    OfflineLinkRewriter.rewriteHtml(text, pair.normalized_url, rel, urlToLocal)
+                }
+                if (out != text) {
+                    file.writeText(out, Charsets.UTF_8)
+                    rewrittenCount++
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "final rewrite failed $rel: ${e.message}")
+            }
+        }
+        logger.i("MirrorEngine", "offline rewrite done, files updated=$rewrittenCount")
     }
 
     private suspend fun refreshStats(status: EngineStatus) {

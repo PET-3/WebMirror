@@ -1,20 +1,27 @@
 # WebMirror
 
-一个简洁的 Android 网站镜像下载工具，UI 参考 [Shizuku](https://github.com/RikkaApps/Shizuku) 的 Material Design 3 风格。
+一个简洁的 Android 网站镜像下载工具，UI 参考 [Shizuku](https://github.com/RikkaApps/Shizuku) 的 Material Design 3 风格。行为上对齐 HTTrack 的核心体验：递归抓取 + 下载完成后链接重写为相对路径，便于离线浏览。
 
 ## 功能
 
 - 输入任意网站 URL，按原目录结构递归下载页面、CSS、JS、图片等资源
-- 可配置最大递归深度（0~5）
-- 可选「仅同域名」过滤外链
-- 实时进度显示与最近文件列表
+- **离线链接重写**（HTTrack 风格）：全部下载完成后，把 HTML/CSS 内站内链接改成相对路径
+- 可配置最大递归深度与并发数
+- 可选「仅同域名」过滤外链、遵守 robots.txt
+- 实时进度显示
 - Material 3 + 动态取色（Android 12+）
-- 文件保存在应用专属目录，无需额外存储权限（Android 10+）
+- 文件写入应用专属目录（无需额外存储权限）；可选完成后导出到用户选择的外部目录（SAF）
 
-## 界面预览
+## 文件保存在哪里
 
-- 卡片式布局，圆角与 Shizuku 类似的干净风格
-- 支持浅色 / 深色 / 动态颜色
+- **工作目录（真实下载位置）**：`Android/data/<包名>/files/Documents/WebMirror/`
+- 若在设置里「选择导出目录」，镜像完成后会自动把整个目录树复制到该位置
+
+用电脑浏览时：把工作目录或导出目录拷到电脑，进入对应站点子目录后执行：
+
+```bash
+python3 -m http.server 8000
+```
 
 ## 构建
 
@@ -35,7 +42,7 @@ APK 输出路径：`app/build/outputs/apk/debug/app-debug.apk`
 - Kotlin + Jetpack Compose
 - Material 3
 - OkHttp + Jsoup
-- Coroutines + Flow
+- Coroutines + Flow + Room
 - minSdk 26 / targetSdk 35
 
 ## 注意

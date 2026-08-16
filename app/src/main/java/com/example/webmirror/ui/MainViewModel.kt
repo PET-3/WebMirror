@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Environment
 import android.util.Log
 import androidx.core.content.FileProvider
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.webmirror.data.MirrorRepository
@@ -18,11 +19,13 @@ import com.example.webmirror.engine.model.DomainPolicy
 import com.example.webmirror.engine.model.MirrorConfig
 import com.example.webmirror.engine.model.RunMode
 import com.example.webmirror.engine.service.MirrorForegroundService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 data class UiState(
@@ -33,8 +36,10 @@ data class UiState(
     val rewriteLinks: Boolean = true,
     val respectRobots: Boolean = true,
     val stats: EngineStats = EngineStats(),
+    /** Always the real on-disk path where the engine writes files. */
     val downloadDirDisplay: String = "",
     val treeUri: Uri? = null,
+    val treeDisplayName: String? = null,
     val lastExportPath: String? = null,
     val toastMessage: String? = null
 )
@@ -50,10 +55,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    /** Avoid exporting the same completion multiple times. */
+    private var lastHandledStatus: EngineStatus = EngineStatus.Idle
+
     init {
         viewModelScope.launch {
             repo.stats.collect { stats ->
                 _uiState.update { it.copy(stats = stats) }
+                // After successful mirror: export to user-chosen SAF folder if set
+                if (stats.status == EngineStatus.Completed && lastHandledStatus != EngineStatus.Completed) {
+                    lastHandledStatus = EngineStatus.Completed
+                    val tree = _uiState.value.treeUri
+                    if (tree != null) {
+                        exportMirrorToSaf(tree)
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                toastMessage = "完成：文件在 ${defaultDir.absolutePath}"
+                            )
+                        }
+                    }
+                } else if (stats.status != EngineStatus.Completed) {
+                    lastHandledStatus = stats.status
+                }
             }
         }
     }
@@ -69,13 +93,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 treeUri = uri,
-                downloadDirDisplay = if (uri != null) displayName else defaultDir.absolutePath
+                treeDisplayName = if (uri != null) displayName else null,
+                // Keep showing the real engine path; note user export target separately in UI
+                downloadDirDisplay = defaultDir.absolutePath
             )
         }
     }
 
     fun clearTreeUri() {
-        _uiState.update { it.copy(treeUri = null, downloadDirDisplay = defaultDir.absolutePath) }
+        _uiState.update {
+            it.copy(
+                treeUri = null,
+                treeDisplayName = null,
+                downloadDirDisplay = defaultDir.absolutePath
+            )
+        }
     }
 
     fun clearToast() = _uiState.update { it.copy(toastMessage = null) }
@@ -96,6 +128,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Start mirror. Always runs engine in ViewModel scope (reliable),
      * and best-effort starts ForegroundService for notification.
+     *
+     * Files are always written to app-specific dir (reliable on Android 10+).
+     * If user picked a SAF folder, contents are copied there after completion.
      */
     fun startDownload(mode: RunMode = RunMode.FRESH) {
         val state = _uiState.value
@@ -110,10 +145,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val dir = defaultDir
+        dir.mkdirs()
         val config = buildConfig(state)
-        logger.i("UI", "startDownload mode=$mode url=$url dir=${dir.absolutePath}")
+        lastHandledStatus = EngineStatus.Idle
+        logger.i("UI", "startDownload mode=$mode url=$url dir=${dir.absolutePath} export=${state.treeUri}")
 
-        // 1) Best-effort notification service (may fail on some OEMs without killing download)
         try {
             MirrorForegroundService.start(
                 context = getApplication(),
@@ -130,10 +166,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             logger.w("UI", "FGS start failed: ${e.message}")
         }
 
-        // 2) Always start engine here so button always does something
         viewModelScope.launch {
             try {
-                _uiState.update { it.copy(toastMessage = "开始镜像…") }
+                val tip = if (state.treeUri != null) {
+                    "开始镜像…（完成后会导出到你选择的目录）"
+                } else {
+                    "开始镜像… 保存于 ${dir.absolutePath}"
+                }
+                _uiState.update {
+                    it.copy(
+                        toastMessage = tip,
+                        downloadDirDisplay = dir.absolutePath
+                    )
+                }
                 repo.setRespectRobots(state.respectRobots)
                 when (mode) {
                     RunMode.FRESH -> repo.startMirror(config, dir)
@@ -166,6 +211,84 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeDownload() {
         repo.unpause()
         _uiState.update { it.copy(toastMessage = "继续下载") }
+    }
+
+    /**
+     * Copy entire mirror tree from app dir into user-selected SAF folder.
+     */
+    private fun exportMirrorToSaf(treeUri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(toastMessage = "正在导出到所选目录…") }
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val app = getApplication<Application>()
+                    val root = DocumentFile.fromTreeUri(app, treeUri)
+                        ?: return@withContext "无法打开所选目录"
+                    val srcRoot = defaultDir
+                    if (!srcRoot.exists()) return@withContext "源目录不存在"
+                    var count = 0
+                    count += copyDirToDocument(srcRoot, root, app)
+                    "已导出 $count 个文件到所选目录（本地缓存仍在 ${srcRoot.absolutePath}）"
+                } catch (e: Exception) {
+                    logger.e("UI", "SAF export failed", e)
+                    "导出失败：${e.message ?: "未知错误"}"
+                }
+            }
+            _uiState.update { it.copy(toastMessage = result) }
+        }
+    }
+
+    private fun copyDirToDocument(src: File, destDir: DocumentFile, app: Application): Int {
+        var n = 0
+        val children = src.listFiles() ?: return 0
+        for (child in children) {
+            if (child.isDirectory) {
+                var sub = destDir.findFile(child.name)
+                if (sub == null || !sub.isDirectory) {
+                    sub = destDir.createDirectory(child.name)
+                }
+                if (sub != null) {
+                    n += copyDirToDocument(child, sub, app)
+                }
+            } else if (child.isFile) {
+                val mime = guessMime(child.name)
+                var target = destDir.findFile(child.name)
+                if (target == null) {
+                    target = destDir.createFile(mime, child.name)
+                }
+                if (target != null) {
+                    try {
+                        app.contentResolver.openOutputStream(target.uri, "wt")?.use { os ->
+                            child.inputStream().use { it.copyTo(os) }
+                        }
+                        n++
+                    } catch (e: Exception) {
+                        Log.w("MainViewModel", "copy failed ${child.name}: ${e.message}")
+                    }
+                }
+            }
+        }
+        return n
+    }
+
+    private fun guessMime(name: String): String {
+        val lower = name.lowercase()
+        return when {
+            lower.endsWith(".html") || lower.endsWith(".htm") -> "text/html"
+            lower.endsWith(".css") -> "text/css"
+            lower.endsWith(".js") || lower.endsWith(".mjs") -> "application/javascript"
+            lower.endsWith(".json") -> "application/json"
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".svg") -> "image/svg+xml"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".woff2") -> "font/woff2"
+            lower.endsWith(".woff") -> "font/woff"
+            lower.endsWith(".ttf") -> "font/ttf"
+            lower.endsWith(".xml") -> "application/xml"
+            else -> "application/octet-stream"
+        }
     }
 
     fun exportLogs(includeAll: Boolean = true) {

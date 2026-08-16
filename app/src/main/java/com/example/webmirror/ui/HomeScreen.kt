@@ -332,9 +332,9 @@ fun HomeScreen(
                         )
                     }
 
-                    // Directory picker
+                    // Directory: engine writes to app dir; optional SAF export after done
                     Text(
-                        text = "保存目录",
+                        text = "工作目录（实际下载位置）",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
@@ -342,10 +342,25 @@ fun HomeScreen(
                         text = state.downloadDirDisplay,
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
-                        maxLines = 2,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Text(
+                        text = "可选：完成后导出到外部目录（文件管理器可选的文件夹）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (state.treeDisplayName != null) {
+                        Text(
+                            text = "导出目标：${state.treeDisplayName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = onPickDirectory,
@@ -358,7 +373,7 @@ fun HomeScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.size(6.dp))
-                            Text("选择目录")
+                            Text(if (state.treeUri != null) "更改导出目录" else "选择导出目录")
                         }
                         if (state.treeUri != null) {
                             OutlinedButton(
@@ -366,7 +381,7 @@ fun HomeScreen(
                                 enabled = !isDownloading,
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("恢复默认")
+                                Text("取消导出")
                             }
                         }
                     }
@@ -580,16 +595,16 @@ if (state.stats.status == EngineStatus.Running) {
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "升级说明（更接近 HTTrack）",
+                        text = "使用说明（接近 HTTrack）",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "• 链接重写：下载完成后把站内链接改成相对路径，离线可正常跳转\n" +
-                                "• 资源发现增强：解析 CSS 的 url() 与 @import\n" +
-                                "• 有限并行下载 + 自动重试\n" +
-                                "• 可自选保存目录（系统文件夹选择器）\n" +
-                                "• 深度 2~3 + 仅同域名 适合大多数静态站",
+                        text = "• 链接重写：下载全部完成后，把站内链接改成相对路径，离线可跳转\n" +
+                                "• 文件先写在「工作目录」（应用私有 Documents/WebMirror）\n" +
+                                "• 若选择了导出目录，完成后会自动复制到该目录\n" +
+                                "• 用电脑浏览：把镜像文件夹拷出后 python3 -m http.server\n" +
+                                "• 深度 2~3 + 仅同域名 适合大多数静态站；SPA 站点无法完整还原",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -1,7 +1,6 @@
 package com.example.webmirror.engine.rewrite
 
-import com.example.webmirror.engine.extract.HtmlResourceExtractor
-import com.example.webmirror.engine.model.LocalPathMapper
+import com.example.webmirror.engine.model.UrlNormalizer
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import java.net.URI
@@ -131,18 +130,8 @@ object OfflineLinkRewriter {
     }
 
     private fun normalizeKey(url: String): String? {
-        // Align with UrlNormalizer-ish identity used when saving
-        return try {
-            val u = URI(url)
-            val scheme = (u.scheme ?: "https").lowercase()
-            val host = (u.host ?: return null).lowercase()
-            val path = u.path ?: "/"
-            val q = u.query
-            val auth = host
-            if (q.isNullOrBlank()) "$scheme://$auth$path" else "$scheme://$auth$path?$q"
-        } catch (_: Exception) {
-            null
-        }
+        // Must match UrlNormalizer used when enqueue/save so map lookups succeed
+        return UrlNormalizer.normalize(url)
     }
 
     private fun resolve(base: String, ref: String): String? {
