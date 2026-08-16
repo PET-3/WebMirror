@@ -1,5 +1,6 @@
 package com.example.webmirror.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -22,6 +23,10 @@ data class ProjectEntity(
     val maxRetries: Int = 3,
 
     val status: String = "IDLE",   // IDLE / RUNNING / PAUSED / COMPLETED / CANCELLED / ERROR
+
+    @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis(),
+
+    @ColumnInfo(name = "updated_at")
     val updatedAt: Long = System.currentTimeMillis()
 )
