@@ -146,7 +146,7 @@ class MirrorEngine(context: Context) {
                 return@withContext
             }
 
-        this.outputDir = outputDir.also { it.mkdirs() }
+        this@MirrorEngine.outputDir = outputDir.also { it.mkdirs() }
         queue.config = config
         queue.seedHost = UrlNormalizer.hostOf(normalized)
         activeConfig = config
@@ -238,7 +238,7 @@ class MirrorEngine(context: Context) {
         stopInternal()
         cancelled = false
         paused = false
-        this.outputDir = outputDir
+        this@MirrorEngine.outputDir = outputDir
         queue.recoverInterrupted()
 
         val host = baseHost
@@ -479,6 +479,22 @@ class MirrorEngine(context: Context) {
         return ct.contains("text/html") || ct.contains("text/css") ||
                 p.endsWith(".html") || p.endsWith(".htm") || p.endsWith(".css") ||
                 !p.contains('.')
+    }
+
+    private fun maybeRewriteFile(file: File, rel: String, baseUrl: String, contentType: String?) {
+        try {
+            val ct = contentType?.lowercase().orEmpty()
+            val p = rel.lowercase()
+            // 只对可能为文本/HTML/CSS 的文件尝试重写，避免处理二进制
+            if (!(ct.contains("text") || p.endsWith(".html") || p.endsWith(".htm") || p.endsWith(".css"))) {
+                return
+            }
+            // TODO: 若存在 OfflineLinkRewriter 的真实 API，请在此处调用：
+            // OfflineLinkRewriter.rewrite(file, baseUrl, resourceDao)
+            // 目前作为 no-op 占位以保证编译通过
+        } catch (e: Exception) {
+            Log.w(TAG, "rewrite failed for $rel: ${e.message}")
+        }
     }
 
     private suspend fun refreshStats(status: EngineStatus) {
