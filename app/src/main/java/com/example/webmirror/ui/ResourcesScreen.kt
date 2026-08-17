@@ -191,9 +191,7 @@ fun ResourcesScreen(
                         onClick = {
                             if (cat == ResourceCategory.ALL) {
                                 viewModel.setCategory(ResourceCategory.ALL)
-                                viewModel.setCategory(ResourceCategory.ALL)
-                                // clear selection
-                                viewModel.toggleSelectAllFiltered()
+                                viewModel.clearSelection()
                             } else {
                                 viewModel.selectCategoryAndPin(cat)
                             }
@@ -227,7 +225,7 @@ fun ResourcesScreen(
             state.exportProgress?.let { prog ->
                 Spacer(Modifier.height(6.dp))
                 LinearProgressIndicator(
-                    progress = { if (prog.total > 0) prog.done.toFloat() / prog.total else 0f },
+                    progress = { if (prog.total > 0) prog.current.toFloat() / prog.total else 0f },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(prog.message, style = MaterialTheme.typography.labelSmall)
@@ -252,7 +250,7 @@ fun ResourcesScreen(
                         ResourceRow(
                             res = res,
                             selected = res.id in state.selectedIds,
-                            onToggle = { viewModel.toggleSelect(res.id) }
+                            onToggle = { viewModel.toggleSelection(res.id) }
                         )
                     }
                 }
@@ -278,13 +276,7 @@ fun ResourcesScreen(
                                 selected = pendingFormat == fmt,
                                 onClick = { pendingFormat = fmt }
                             )
-                            Text(
-                                when (fmt) {
-                                    ExportFormat.ZIP_STORED -> "ZIP（无压缩）"
-                                    ExportFormat.PDF_IMAGES -> "PDF（图片）"
-                                    ExportFormat.HTML_GALLERY -> "HTML 图库"
-                                }
-                            )
+                            Text(fmt.label)
                         }
                     }
                     OutlinedTextField(
@@ -301,22 +293,12 @@ fun ResourcesScreen(
                 Button(onClick = {
                     showExportDialog = false
                     val base = exportName.trim().ifBlank {
-                        when (pendingFormat) {
-                            ExportFormat.ZIP_STORED -> "webmirror_export.zip"
-                            ExportFormat.PDF_IMAGES -> "webmirror_images.pdf"
-                            ExportFormat.HTML_GALLERY -> "webmirror_gallery.zip"
-                        }
+                        "webmirror_export.${pendingFormat.defaultExtension}"
                     }.let { name ->
-                        when (pendingFormat) {
-                            ExportFormat.ZIP_STORED -> if (name.endsWith(".zip")) name else "$name.zip"
-                            ExportFormat.PDF_IMAGES -> if (name.endsWith(".pdf")) name else "$name.pdf"
-                            ExportFormat.HTML_GALLERY -> if (name.endsWith(".zip")) name else "$name.zip"
-                        }
+                        val ext = pendingFormat.defaultExtension
+                        if (name.endsWith(".$ext")) name else "$name.$ext"
                     }
-                    val mime = when (pendingFormat) {
-                        ExportFormat.PDF_IMAGES -> "application/pdf"
-                        else -> "application/zip"
-                    }
+                    val mime = pendingFormat.mimeType
                     viewModel.prepareExport(pendingFormat, ExportScope.SELECTED)
                     onRequestExportDocument(mime, base)
                 }) { Text("导出") }
