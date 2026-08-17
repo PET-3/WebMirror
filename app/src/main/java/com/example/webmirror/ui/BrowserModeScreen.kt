@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +55,7 @@ fun BrowserModeScreen(
     onBack: () -> Unit,
     onStartCapture: () -> Unit,
     onOpenSettings: () -> Unit = {},
+    onOpenResources: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -80,6 +82,7 @@ fun BrowserModeScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = onOpenResources) { Text("暂存") }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }

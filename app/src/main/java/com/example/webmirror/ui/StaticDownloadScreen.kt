@@ -61,8 +61,12 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import com.example.webmirror.engine.EngineStatus
 import com.example.webmirror.engine.model.RunMode
+import com.example.webmirror.model.DownloadFormatFilter
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.FilterChip
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun StaticDownloadScreen(
     viewModel: MainViewModel,
@@ -99,6 +103,7 @@ fun StaticDownloadScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = onOpenResources) { Text("暂存") }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
@@ -146,6 +151,25 @@ fun StaticDownloadScreen(
                         ),
                         shape = RoundedCornerShape(12.dp)
                     )
+
+                    Text("只下载格式（不选=全部；仍会抓 HTML/CSS/JS 以便发现链接）", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        DownloadFormatFilter.PRESETS.forEach { (ext, label) ->
+                            val selected = ext in state.formatFilter.extensions
+                            FilterChip(
+                                selected = selected,
+                                onClick = { viewModel.toggleFormatExtension(ext) },
+                                label = { Text(label) }
+                            )
+                        }
+                        if (state.formatFilter.extensions.isNotEmpty()) {
+                            FilterChip(
+                                selected = false,
+                                onClick = { viewModel.clearFormatFilter() },
+                                label = { Text("清除") }
+                            )
+                        }
+                    }
 
                     Button(
                         onClick = {

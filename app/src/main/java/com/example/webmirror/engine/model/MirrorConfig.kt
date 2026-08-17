@@ -13,6 +13,9 @@ data class MirrorConfig(
     val limits: CrawlLimits = CrawlLimits(),
     val rewriteLinks: Boolean = true,
     val allowedKinds: Set<MimeTypeResolver.Kind> = emptySet(),
+    /** Lowercase extensions without dot; empty = all. Discovery docs still kept if non-empty. */
+    val allowedExtensions: Set<String> = emptySet(),
+    val keepDiscoveryDocs: Boolean = true,
     val respectRobots: Boolean = true,
     val proxyHost: String? = null,
     val proxyPort: Int = 0,

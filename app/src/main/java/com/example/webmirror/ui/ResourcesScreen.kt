@@ -1,7 +1,6 @@
 package com.example.webmirror.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +24,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -60,7 +61,6 @@ import com.example.webmirror.export.ExportProgress
 import com.example.webmirror.export.ExportScope
 import com.example.webmirror.model.FileTypeFilter
 import com.example.webmirror.model.ResourceCategory
-import com.example.webmirror.model.ResourceSort
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -72,23 +72,51 @@ fun ResourcesScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val filtered = viewModel.filteredResources()
+    // Pin selected to top
+    val ordered = remember(filtered, state.selectedIds) {
+        val sel = filtered.filter { it.id in state.selectedIds }
+        val rest = filtered.filter { it.id !in state.selectedIds }
+        sel + rest
+    }
     var showExportDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deletePhysical by remember { mutableStateOf(false) }
     var pendingFormat by remember { mutableStateOf(ExportFormat.ZIP_STORED) }
-    var pendingScope by remember { mutableStateOf(ExportScope.SELECTED) }
+    var exportName by remember { mutableStateOf("") }
+    var folderPath by remember { mutableStateOf("") } // relative folder prefix for folder view
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("资源暂存", fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Text(
+                        when (state.stagingSource) {
+                            "static" -> "静态暂存"
+                            "browser" -> "浏览器暂存"
+                            else -> "资源暂存"
+                        },
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        viewModel.setStagingViewMode(
+                            if (state.stagingViewMode == "folder") "list" else "folder"
+                        )
+                        folderPath = ""
+                    }) {
+                        Icon(
+                            if (state.stagingViewMode == "folder") Icons.Default.List
+                            else Icons.Default.Folder,
+                            contentDescription = "切换视图"
+                        )
+                    }
                     IconButton(onClick = { viewModel.toggleSelectAllFiltered() }) {
                         Icon(
                             if (viewModel.isAllFilteredSelected()) Icons.Default.CheckBox
@@ -104,9 +132,17 @@ fun ResourcesScreen(
                             }
                         }
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = "移出选择")
+                        Icon(Icons.Default.Delete, contentDescription = "删除")
                     }
-                    IconButton(onClick = { showExportDialog = true }) {
+                    IconButton(onClick = {
+                        if (state.selectedIds.isEmpty()) {
+                            viewModel.showToast("请先选择要导出的文件")
+                        } else {
+                            exportName = ""
+                            pendingFormat = ExportFormat.ZIP_STORED
+                            showExportDialog = true
+                        }
+                    }) {
                         Icon(Icons.Default.Share, contentDescription = "导出")
                     }
                 }
@@ -119,232 +155,211 @@ fun ResourcesScreen(
                 .padding(padding)
                 .padding(horizontal = 12.dp)
         ) {
+            // Source tabs
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("all" to "全部", "static" to "静态", "browser" to "浏览器").forEach { (key, label) ->
+                    FilterChip(
+                        selected = state.stagingSource == key,
+                        onClick = { viewModel.setStagingSource(key) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
             OutlinedTextField(
                 value = state.resourceQuery,
                 onValueChange = viewModel::updateResourceQuery,
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                placeholder = { Text("搜索文件名 / 扩展名 / URL") },
+                placeholder = { Text("搜索") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
+                singleLine = true,
                 shape = RoundedCornerShape(12.dp)
             )
             Spacer(Modifier.height(8.dp))
 
-            // Category chips
+            // Category chips — click selects all of that type + pin
+            Text("类型（点选即勾选该类）", style = MaterialTheme.typography.labelMedium)
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 ResourceCategory.entries.forEach { cat ->
+                    val selected = state.filter.category == cat
                     FilterChip(
-                        selected = state.filter.category == cat,
-                        onClick = { viewModel.setCategory(cat) },
+                        selected = selected,
+                        onClick = {
+                            if (cat == ResourceCategory.ALL) {
+                                viewModel.setCategory(ResourceCategory.ALL)
+                                viewModel.setCategory(ResourceCategory.ALL)
+                                // clear selection
+                                viewModel.toggleSelectAllFiltered()
+                            } else {
+                                viewModel.selectCategoryAndPin(cat)
+                            }
+                        },
                         label = { Text(cat.label) }
                     )
                 }
             }
-
-            if (state.filter.category == ResourceCategory.IMAGE) {
-                Spacer(Modifier.height(6.dp))
-                Text("图片格式（可多选，空=全部）", style = MaterialTheme.typography.labelMedium)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    FileTypeFilter.IMAGE_EXTENSIONS.forEach { ext ->
-                        val selected = ext in state.filter.imageExtensions
-                        FilterChip(
-                            selected = selected,
-                            onClick = { viewModel.toggleImageExt(ext) },
-                            label = { Text(ext.uppercase()) }
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(6.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Extension quick-select (e.g. png → select all png)
+            Text("扩展名（点选即勾选并置顶）", style = MaterialTheme.typography.labelMedium)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    "显示 ${filtered.size} · 已选 ${state.selectedIds.size}",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Row {
-                    TextButton(onClick = { viewModel.setSort(ResourceSort.TIME_DESC) }) { Text("时间") }
-                    TextButton(onClick = { viewModel.setSort(ResourceSort.NAME_ASC) }) { Text("名称") }
-                    TextButton(onClick = { viewModel.setSort(ResourceSort.SIZE_DESC) }) { Text("大小") }
-                }
-            }
-
-            // Export progress
-            state.exportProgress?.let { ep ->
-                if (!ep.done && !ep.cancelled) {
-                    Column(Modifier.padding(vertical = 6.dp)) {
-                        Text(ep.message.ifBlank { "导出中…" }, style = MaterialTheme.typography.bodySmall)
-                        LinearProgressIndicator(
-                            progress = { ep.fraction },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text("${ep.current} / ${ep.total}", style = MaterialTheme.typography.labelSmall)
-                        TextButton(onClick = viewModel::cancelExport) { Text("取消导出") }
-                    }
-                }
-            }
-
-            LazyColumn(
-                contentPadding = PaddingValues(bottom = 88.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                items(filtered, key = { it.id }) { res ->
-                    ResourceRow(
-                        resource = res,
-                        selected = res.id in state.selectedIds,
-                        onToggle = { viewModel.toggleSelection(res.id) }
+                listOf("png", "jpg", "jpeg", "webp", "gif", "svg", "html", "css", "js", "ktx2", "woff2", "mp4").forEach { ext ->
+                    FilterChip(
+                        selected = ext in state.filter.imageExtensions,
+                        onClick = { viewModel.selectExtensionAndPin(ext) },
+                        label = { Text(ext.uppercase()) }
                     )
                 }
             }
+            Spacer(Modifier.height(8.dp))
 
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        deletePhysical = false
-                        showDeleteDialog = true
-                    },
-                    enabled = state.selectedIds.isNotEmpty(),
-                    modifier = Modifier.weight(1f)
-                ) { Text("移出选择 (${state.selectedIds.size})") }
-                Button(
-                    onClick = { showExportDialog = true },
-                    modifier = Modifier.weight(1f)
-                ) { Text("导出") }
+            Text(
+                "已选 ${state.selectedIds.size} · 显示 ${ordered.size}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            state.exportProgress?.let { prog ->
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { if (prog.total > 0) prog.done.toFloat() / prog.total else 0f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(prog.message, style = MaterialTheme.typography.labelSmall)
             }
-        }
-    }
 
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("移除资源") },
-            text = {
-                Column {
-                    Text("已选 ${state.selectedIds.size} 项。")
-                    Text("「仅移出选择」不会删除磁盘上的镜像文件。")
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = deletePhysical, onCheckedChange = { deletePhysical = it })
-                        Text("同时删除镜像文件（危险）")
+            Spacer(Modifier.height(8.dp))
+
+            if (state.stagingViewMode == "folder") {
+                FolderView(
+                    resources = ordered,
+                    folderPath = folderPath,
+                    selectedIds = state.selectedIds,
+                    onNavigate = { folderPath = it },
+                    onToggle = viewModel::toggleSelection
+                )
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    items(ordered, key = { it.id }) { res ->
+                        ResourceRow(
+                            res = res,
+                            selected = res.id in state.selectedIds,
+                            onToggle = { viewModel.toggleSelect(res.id) }
+                        )
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDeleteDialog = false
-                    viewModel.removeSelected(deleteFiles = deletePhysical)
-                }) { Text("确认") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("取消") }
             }
-        )
+        }
     }
 
     if (showExportDialog) {
         AlertDialog(
             onDismissRequest = { showExportDialog = false },
-            title = { Text("选择导出方式") },
+            title = { Text("导出 ${state.selectedIds.size} 项") },
             text = {
-                Column {
-                    Text("范围", fontWeight = FontWeight.SemiBold)
-                    ScopeRadio("仅已选择 (${state.selectedIds.size})", ExportScope.SELECTED, pendingScope) {
-                        pendingScope = it
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("格式", fontWeight = FontWeight.Medium)
+                    ExportFormat.entries.forEach { fmt ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { pendingFormat = fmt }
+                        ) {
+                            RadioButton(
+                                selected = pendingFormat == fmt,
+                                onClick = { pendingFormat = fmt }
+                            )
+                            Text(
+                                when (fmt) {
+                                    ExportFormat.ZIP_STORED -> "ZIP（无压缩）"
+                                    ExportFormat.PDF_IMAGES -> "PDF（图片）"
+                                    ExportFormat.HTML_GALLERY -> "HTML 图库"
+                                }
+                            )
+                        }
                     }
-                    ScopeRadio("当前筛选 (${filtered.size})", ExportScope.FILTERED, pendingScope) {
-                        pendingScope = it
-                    }
-                    ScopeRadio("整个镜像 (${state.stagingResources.size})", ExportScope.ENTIRE_MIRROR, pendingScope) {
-                        pendingScope = it
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Text("格式", fontWeight = FontWeight.SemiBold)
-                    FormatRadio(ExportFormat.ZIP_STORED, pendingFormat) { pendingFormat = it }
-                    FormatRadio(ExportFormat.PDF, pendingFormat) { pendingFormat = it }
-                    FormatRadio(ExportFormat.HTML, pendingFormat) { pendingFormat = it }
-                    Text(
-                        "HTML 会打成含 index.html + assets 的 ZIP，解压后可离线打开。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    OutlinedTextField(
+                        value = exportName,
+                        onValueChange = { exportName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("自定义名称（可选）") },
+                        singleLine = true,
+                        placeholder = { Text("留空则自动命名") }
                     )
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                Button(onClick = {
                     showExportDialog = false
-                    viewModel.prepareExport(pendingFormat, pendingScope)
-                    val name = viewModel.suggestExportFileName(pendingFormat)
-                    onRequestExportDocument(pendingFormat.mimeType, name)
-                }) { Text("继续") }
+                    val base = exportName.trim().ifBlank {
+                        when (pendingFormat) {
+                            ExportFormat.ZIP_STORED -> "webmirror_export.zip"
+                            ExportFormat.PDF_IMAGES -> "webmirror_images.pdf"
+                            ExportFormat.HTML_GALLERY -> "webmirror_gallery.zip"
+                        }
+                    }.let { name ->
+                        when (pendingFormat) {
+                            ExportFormat.ZIP_STORED -> if (name.endsWith(".zip")) name else "$name.zip"
+                            ExportFormat.PDF_IMAGES -> if (name.endsWith(".pdf")) name else "$name.pdf"
+                            ExportFormat.HTML_GALLERY -> if (name.endsWith(".zip")) name else "$name.zip"
+                        }
+                    }
+                    val mime = when (pendingFormat) {
+                        ExportFormat.PDF_IMAGES -> "application/pdf"
+                        else -> "application/zip"
+                    }
+                    viewModel.prepareExport(pendingFormat, ExportScope.SELECTED)
+                    onRequestExportDocument(mime, base)
+                }) { Text("导出") }
             },
             dismissButton = {
                 TextButton(onClick = { showExportDialog = false }) { Text("取消") }
             }
         )
     }
-}
 
-@Composable
-private fun ScopeRadio(
-    label: String,
-    value: ExportScope,
-    selected: ExportScope,
-    onSelect: (ExportScope) -> Unit
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onSelect(value) }
-    ) {
-        RadioButton(selected = selected == value, onClick = { onSelect(value) })
-        Text(label)
-    }
-}
-
-@Composable
-private fun FormatRadio(
-    value: ExportFormat,
-    selected: ExportFormat,
-    onSelect: (ExportFormat) -> Unit
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onSelect(value) }
-    ) {
-        RadioButton(selected = selected == value, onClick = { onSelect(value) })
-        Text(value.label)
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("移除选中项") },
+            text = {
+                Column {
+                    Text("从暂存中移除 ${state.selectedIds.size} 项？")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = deletePhysical, onCheckedChange = { deletePhysical = it })
+                        Text("同时删除磁盘文件")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showDeleteDialog = false
+                    viewModel.removeSelected(deletePhysical)
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("取消") }
+            }
+        )
     }
 }
 
 @Composable
 private fun ResourceRow(
-    resource: ResourceEntity,
+    res: ResourceEntity,
     selected: Boolean,
     onToggle: () -> Unit
 ) {
-    val path = resource.localPath.orEmpty()
-    val name = FileTypeFilter.displayName(path)
-    val ext = FileTypeFilter.extensionOf(path).uppercase().ifBlank { "—" }
-    val size = formatBytes(resource.contentLength ?: 0L)
+    val path = res.localPath ?: res.url
     Row(
         Modifier
             .fillMaxWidth()
@@ -354,52 +369,111 @@ private fun ResourceRow(
                 RoundedCornerShape(12.dp)
             )
             .clickable(onClick = onToggle)
-            .padding(10.dp),
+            .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(checked = selected, onCheckedChange = { onToggle() })
-        Spacer(Modifier.width(4.dp))
-        Box(
-            Modifier
-                .size(44.dp)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(8.dp))
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(ext.take(4), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                name,
+                FileTypeFilter.displayName(path),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium
             )
             Text(
-                "$ext · $size",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                resource.normalizedUrl,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                path,
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            formatSize(res.contentLength),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun FolderView(
+    resources: List<ResourceEntity>,
+    folderPath: String,
+    selectedIds: Set<Long>,
+    onNavigate: (String) -> Unit,
+    onToggle: (Long) -> Unit
+) {
+    val prefix = folderPath.trim('/').let { if (it.isEmpty()) "" else "$it/" }
+    val folders = linkedSetOf<String>()
+    val files = mutableListOf<ResourceEntity>()
+    resources.forEach { r ->
+        val path = (r.localPath ?: return@forEach).trimStart('/')
+        if (!path.startsWith(prefix) && prefix.isNotEmpty()) return@forEach
+        if (prefix.isEmpty() && path.isEmpty()) return@forEach
+        val rest = if (prefix.isEmpty()) path else path.removePrefix(prefix)
+        val slash = rest.indexOf('/')
+        if (slash >= 0) {
+            folders.add(rest.substring(0, slash))
+        } else if (rest.isNotEmpty()) {
+            files.add(r)
+        }
+    }
+
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        contentPadding = PaddingValues(bottom = 24.dp)
+    ) {
+        if (folderPath.isNotEmpty()) {
+            item {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val parent = folderPath.trim('/').substringBeforeLast('/', "")
+                            onNavigate(parent)
+                        }
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Folder, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("..")
+                }
+            }
+        }
+        items(folders.toList()) { name ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp))
+                    .clickable {
+                        onNavigate(if (folderPath.isEmpty()) name else "${folderPath.trimEnd('/')}/$name")
+                    }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text(name, fontWeight = FontWeight.Medium)
+            }
+        }
+        items(files, key = { it.id }) { res ->
+            ResourceRow(
+                res = res,
+                selected = res.id in selectedIds,
+                onToggle = { onToggle(res.id) }
             )
         }
     }
 }
 
-private fun formatBytes(bytes: Long): String {
-    if (bytes <= 0) return "—"
+private fun formatSize(bytes: Long?): String {
+    if (bytes == null || bytes <= 0) return "—"
     if (bytes < 1024) return "$bytes B"
     val kb = bytes / 1024.0
     if (kb < 1024) return String.format("%.1f KB", kb)
-    val mb = kb / 1024.0
-    if (mb < 1024) return String.format("%.2f MB", mb)
-    return String.format("%.2f GB", mb / 1024.0)
+    return String.format("%.2f MB", kb / 1024.0)
 }

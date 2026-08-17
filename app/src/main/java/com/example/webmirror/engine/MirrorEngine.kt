@@ -443,6 +443,21 @@ class MirrorEngine(context: Context) {
                         return
                     }
                 }
+                // Optional extension filter (pre-selected formats)
+                if (cfg != null && cfg.allowedExtensions.isNotEmpty()) {
+                    val lower = rel.lowercase()
+                    val ext = lower.substringAfterLast('.', missingDelimiterValue = "")
+                    val isDiscovery = ext in setOf("html", "htm", "css", "js", "mjs", "cjs", "json", "xml") ||
+                        (result.contentType?.contains("text/html") == true) ||
+                        (result.contentType?.contains("text/css") == true) ||
+                        (result.contentType?.contains("javascript") == true)
+                    val allowed = ext in cfg.allowedExtensions || (cfg.keepDiscoveryDocs && isDiscovery)
+                    if (!allowed) {
+                        file.delete()
+                        queue.markSkipped(id, "extension filtered: $ext")
+                        return
+                    }
+                }
                 // Max file size
                 if (cfg != null && result.bytesWritten > cfg.limits.maxFileBytes) {
                     file.delete()

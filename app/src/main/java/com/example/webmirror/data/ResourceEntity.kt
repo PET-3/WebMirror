@@ -5,16 +5,13 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-/**
- * One row per unique normalized URL in a mirror project.
- * Used for dedup, resume, continue, update, path mapping.
- */
 @Entity(
     tableName = "resources",
     indices = [
         Index(value = ["normalized_url"], unique = true),
         Index(value = ["status"]),
-        Index(value = ["local_path"])
+        Index(value = ["local_path"]),
+        Index(value = ["capture_source"])
     ]
 )
 data class ResourceEntity(
@@ -55,6 +52,10 @@ data class ResourceEntity(
 
     @ColumnInfo(name = "error_message")
     val errorMessage: String? = null,
+
+    /** "static" | "browser" | null (legacy) */
+    @ColumnInfo(name = "capture_source")
+    val captureSource: String? = null,
 
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis(),

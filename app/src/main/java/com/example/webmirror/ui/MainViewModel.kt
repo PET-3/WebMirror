@@ -27,6 +27,7 @@ import com.example.webmirror.export.ExportManager
 import com.example.webmirror.export.ExportProgress
 import com.example.webmirror.export.ExportRequest
 import com.example.webmirror.export.ExportScope
+import com.example.webmirror.model.DownloadFormatFilter
 import com.example.webmirror.model.FileTypeFilter
 import com.example.webmirror.model.ResourceCategory
 import com.example.webmirror.model.ResourceSort
@@ -65,7 +66,10 @@ data class UiState(
     val defaultSaveFormat: DefaultSaveFormat = DefaultSaveFormat.FOLDER,
     val saveLocationDisplay: String = "",
     val autoCleanLogs: Boolean = true,
-    val logRetentionDays: Int = 7
+    val logRetentionDays: Int = 7,
+    val formatFilter: DownloadFormatFilter = DownloadFormatFilter(),
+    val stagingSource: String = "all", // all | static | browser
+    val stagingViewMode: String = "list" // list | folder
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -107,14 +111,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(stats = stats) }
                 if (stats.status == EngineStatus.Completed && lastHandledStatus != EngineStatus.Completed) {
                     lastHandledStatus = EngineStatus.Completed
+                    // Tag this run's files without source as static
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            repo.resourceDao().tagNullSource("static")
+                        }
+                    }
                     refreshStaging()
+                    // Apply default save format → user-visible location
+                    val savedMsg = withContext(Dispatchers.IO) {
+                        runCatching { publishDefaultSave("static") }.getOrElse { e ->
+                            "完成，但保存到下载目录失败：${e.message}"
+                        }
+                    }
                     val tree = _uiState.value.treeUri
                     if (tree != null) {
                         exportMirrorToSaf(tree)
-                    } else {
-                        _uiState.update {
-                            it.copy(toastMessage = "完成：可打开「资源暂存」整理并导出")
-                        }
+                    }
+                    _uiState.update {
+                        it.copy(toastMessage = savedMsg)
                     }
                 } else if (stats.status != EngineStatus.Completed) {
                     lastHandledStatus = stats.status
@@ -167,9 +182,83 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearToast() = _uiState.update { it.copy(toastMessage = null) }
 
-    fun showToast(msg: String) = _uiState.update { it.copy(toastMessage = msg) }
+
+    fun toggleFormatExtension(ext: String) {
+        _uiState.update { st ->
+            val cur = st.formatFilter.extensions.toMutableSet()
+            if (ext in cur) cur.remove(ext) else cur.add(ext)
+            st.copy(formatFilter = st.formatFilter.copy(extensions = cur))
+        }
+    }
+
+    fun clearFormatFilter() {
+        _uiState.update { it.copy(formatFilter = DownloadFormatFilter()) }
+    }
+
+    fun setStagingSource(source: String) {
+        _uiState.update { it.copy(stagingSource = source, selectedIds = emptySet()) }
+        refreshStaging()
+    }
+
+    fun setStagingViewMode(mode: String) {
+        _uiState.update { it.copy(stagingViewMode = mode) }
+    }
+
+    
+    /** Pin + select all resources with given extension (e.g. "png"). */
+    fun selectExtensionAndPin(ext: String) {
+        val e = ext.lowercase().removePrefix(".")
+        val all = _uiState.value.stagingResources
+        val matched = all.filter {
+            FileTypeFilter.extensionOf(it.localPath ?: it.url) == e
+        }
+        val ids = matched.map { it.id }.toSet()
+        val cat = when (e) {
+            in FileTypeFilter.IMAGE_EXTENSIONS -> ResourceCategory.IMAGE
+            "html", "htm" -> ResourceCategory.HTML
+            "css" -> ResourceCategory.CSS
+            "js", "mjs" -> ResourceCategory.JS
+            else -> ResourceCategory.ALL
+        }
+        _uiState.update {
+            it.copy(
+                selectedIds = ids,
+                filter = it.filter.copy(
+                    category = if (e in FileTypeFilter.IMAGE_EXTENSIONS) ResourceCategory.IMAGE else cat,
+                    imageExtensions = if (e in FileTypeFilter.IMAGE_EXTENSIONS) setOf(e) else emptySet()
+                )
+            )
+        }
+        if (ids.isEmpty()) {
+            showToast("暂无 .$e 文件")
+        }
+    }
+
+    fun openStaging(source: String = "all") {
+        setStagingSource(source)
+        refreshStaging()
+    }
+
+    fun selectCategoryAndPin(category: ResourceCategory) {
+        val all = _uiState.value.stagingResources
+        val matched = all.filter {
+            val path = it.localPath ?: it.url
+            FileTypeFilter.categoryOf(path, it.contentType) == category
+        }
+        val ids = matched.map { it.id }.toSet()
+        _uiState.update {
+            it.copy(
+                selectedIds = ids,
+                filter = it.filter.copy(category = category)
+            )
+        }
+    }
+
+        fun showToast(msg: String) = _uiState.update { it.copy(toastMessage = msg) }
 
     fun mirrorRoot(): File = defaultDir
+    fun mirrorStaticRoot(): File = File(defaultDir, "static").also { it.mkdirs() }
+    fun mirrorBrowserRoot(): File = File(defaultDir, "browser").also { it.mkdirs() }
 
     private fun buildConfig(state: UiState): MirrorConfig {
         return MirrorConfig(
@@ -180,7 +269,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ),
             limits = CrawlLimits(maxDepth = state.maxDepth),
             rewriteLinks = state.rewriteLinks,
-            respectRobots = state.respectRobots
+            respectRobots = state.respectRobots,
+            allowedExtensions = state.formatFilter.extensions,
+            keepDiscoveryDocs = state.formatFilter.keepDiscoveryDocs
         )
     }
 
@@ -196,8 +287,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val dir = defaultDir
-        dir.mkdirs()
+        val dir = File(defaultDir, "static").also { it.mkdirs() }
         val config = buildConfig(state)
         lastHandledStatus = EngineStatus.Idle
         logger.i("UI", "startDownload mode=$mode url=$url dir=${dir.absolutePath}")
@@ -262,7 +352,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshStaging() {
         viewModelScope.launch {
-            val list = withContext(Dispatchers.IO) { repo.allDownloadedResources() }
+            val source = _uiState.value.stagingSource
+            val list = withContext(Dispatchers.IO) {
+                when (source) {
+                    "static", "browser" -> repo.resourceDao().allDownloadedBySource(source)
+                    else -> repo.allDownloadedResources()
+                }
+            }
             _uiState.update { it.copy(stagingResources = list) }
         }
     }
@@ -289,6 +385,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setSort(sort: ResourceSort) = _uiState.update { it.copy(resourceSort = sort) }
+
+    fun clearSelection() {
+        _uiState.update { it.copy(selectedIds = emptySet()) }
+    }
 
     fun toggleSelection(id: Long) {
         _uiState.update {
@@ -574,7 +674,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         depth = 0,
                         status = com.example.webmirror.data.ResourceStatus.DOWNLOADED.name,
                         contentLength = byteSize.toLong(),
-                        contentType = null
+                        contentType = null,
+                        captureSource = "browser"
                     )
                 )
             } catch (e: Exception) {
@@ -584,9 +685,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onBrowserCaptureFinished(count: Int) {
-        refreshStaging()
-        _uiState.update {
-            it.copy(toastMessage = "浏览器捕获结束：约 $count 个资源，可打开资源暂存")
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { repo.resourceDao().tagNullSource("browser") }
+            }
+            openStaging("browser")
+            val msg = withContext(Dispatchers.IO) {
+                runCatching { publishDefaultSave("browser") }.getOrElse { "浏览器捕获结束：$count 个资源" }
+            }
+            _uiState.update { it.copy(toastMessage = "$msg（$count 个）") }
         }
     }
 
@@ -650,6 +757,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun resolveSaveLocationLabel(): String {
         return StoragePaths.getDownloadDir(getApplication()).absolutePath
+    }
+
+
+    /**
+     * Copy or zip the mode subdirectory into user save location (Download/WebMirror or custom).
+     */
+    private suspend fun publishDefaultSave(mode: String): String {
+        val src = when (mode) {
+            "browser" -> mirrorBrowserRoot()
+            else -> mirrorStaticRoot()
+        }
+        if (!src.exists() || src.listFiles().isNullOrEmpty()) {
+            return "完成：工作目录无文件（可打开资源暂存核对）"
+        }
+        val destRoot = StoragePaths.getDownloadDir(getApplication()).also { it.mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+            .format(java.util.Date())
+        val format = _uiState.value.defaultSaveFormat
+        return when (format) {
+            DefaultSaveFormat.FOLDER -> {
+                val out = File(destRoot, "mirror_${mode}_$stamp").also { it.mkdirs() }
+                src.copyRecursively(out, overwrite = true)
+                "完成：已保存文件夹\n${out.absolutePath}"
+            }
+            DefaultSaveFormat.ZIP -> {
+                val out = File(destRoot, "mirror_${mode}_$stamp.zip")
+                zipDirStored(src, out)
+                "完成：已保存 ZIP\n${out.absolutePath}"
+            }
+        }
+    }
+
+    private fun zipDirStored(srcDir: File, zipFile: File) {
+        java.util.zip.ZipOutputStream(zipFile.outputStream().buffered()).use { zos ->
+            val base = srcDir.toPath()
+            srcDir.walkTopDown().filter { it.isFile }.forEach { f ->
+                val entryName = base.relativize(f.toPath()).toString().replace('\\', '/')
+                val entry = java.util.zip.ZipEntry(entryName)
+                entry.method = java.util.zip.ZipEntry.STORED
+                val data = f.readBytes()
+                entry.size = data.size.toLong()
+                entry.compressedSize = data.size.toLong()
+                val crc = java.util.zip.CRC32()
+                crc.update(data)
+                entry.crc = crc.value
+                zos.putNextEntry(entry)
+                zos.write(data)
+                zos.closeEntry()
+            }
+        }
     }
 
     fun setDefaultSaveFormat(format: DefaultSaveFormat) {

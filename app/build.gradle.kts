@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.webmirror"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "1.9.1-modes"
+        versionCode = 18
+        versionName = "1.10.1-gaps"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

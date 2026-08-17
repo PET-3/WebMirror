@@ -115,6 +115,10 @@ interface ResourceDao {
     @Query("SELECT * FROM resources WHERE status = 'DOWNLOADED' AND local_path IS NOT NULL ORDER BY updated_at DESC")
     suspend fun allDownloaded(): List<ResourceEntity>
 
+
+    @Query("SELECT * FROM resources WHERE status = 'DOWNLOADED' AND capture_source = :source ORDER BY updated_at DESC")
+    suspend fun allDownloadedBySource(source: String): List<ResourceEntity>
+
     @Query("SELECT * FROM resources WHERE status = 'DOWNLOADED' AND local_path IS NOT NULL ORDER BY updated_at DESC")
     fun observeDownloaded(): Flow<List<ResourceEntity>>
 
@@ -126,6 +130,10 @@ interface ResourceDao {
 
     @Query("DELETE FROM resources WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
+
+    @Query("UPDATE resources SET capture_source = :source WHERE capture_source IS NULL")
+    suspend fun tagNullSource(source: String)
+
 }
 
 data class UrlPathPair(

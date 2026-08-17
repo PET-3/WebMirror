@@ -14,8 +14,9 @@ object LocalPathMapper {
             val uri = URI(normalizedUrl)
             val host = (uri.host ?: "unknown").replace(Regex("[\\\\:*?\"<>|]"), "_")
             var path = uri.path ?: "/"
-            if (path.isEmpty() || path.endsWith("/")) {
-                path += "index.html"
+            // Homepage / directory URL → index.html (HTTrack-style)
+            if (path.isEmpty() || path == "/" || path.endsWith("/")) {
+                path = if (path.endsWith("/")) path + "index.html" else "/index.html"
             }
             val segments = path.split("/").filter { it.isNotEmpty() }.map {
                 it.replace(Regex("[\\\\:*?\"<>|]"), "_")
@@ -47,9 +48,14 @@ object LocalPathMapper {
     private fun looksLikePage(path: String): Boolean {
         val lower = path.lowercase()
         val assetExt = listOf(
-            ".css", ".js", ".mjs", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp",
-            ".woff", ".woff2", ".ttf", ".otf", ".ico", ".json", ".xml", ".pdf",
-            ".mp4", ".webm", ".mp3", ".wav", ".wasm", ".zip"
+            ".css", ".js", ".mjs", ".cjs", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp",
+            ".avif", ".bmp", ".ico",
+            ".woff", ".woff2", ".ttf", ".otf", ".eot",
+            ".json", ".xml", ".pdf", ".map",
+            ".mp4", ".webm", ".mp3", ".wav", ".ogg",
+            ".wasm", ".zip", ".bin", ".data",
+            ".ktx", ".ktx2", ".basis", ".dds",
+            ".glb", ".gltf", ".fbx", ".obj", ".mtl", ".hdr", ".exr"
         )
         return assetExt.none { lower.endsWith(it) }
     }

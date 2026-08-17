@@ -105,7 +105,7 @@ class MainActivity : ComponentActivity() {
                             viewModel = viewModel,
                             onBack = { screen = "home" },
                             onOpenResources = {
-                                viewModel.refreshStaging()
+                                viewModel.openStaging("static")
                                 screen = "resources"
                             },
                             onOpenSettings = { screen = "settings" }
@@ -114,13 +114,17 @@ class MainActivity : ComponentActivity() {
                             viewModel = viewModel,
                             onBack = { screen = "home" },
                             onStartCapture = { screen = "browser_capture" },
-                            onOpenSettings = { screen = "settings" }
+                            onOpenSettings = { screen = "settings" },
+                            onOpenResources = {
+                                viewModel.openStaging("browser")
+                                screen = "resources"
+                            }
                         )
                         "browser_capture" -> {
                             val state = viewModel.uiState.value
                             BrowserCaptureScreen(
                                 startUrl = state.url,
-                                outputDir = viewModel.mirrorRoot(),
+                                outputDir = viewModel.mirrorBrowserRoot(),
                                 sameHostOnly = state.sameDomainOnly,
                                 onClose = { screen = "browser_setup" },
                                 onFinished = { count ->
