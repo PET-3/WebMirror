@@ -13,7 +13,7 @@ import java.util.zip.ZipOutputStream
 /**
  * Offline HTML image gallery export.
  * Output is a single ZIP containing:
- *   index.html + assets/* + assets/style.css + assets/script.js
+ *   index.html + assets/ + style.css + assets/script.js
  * All local — no CDN. Visual direction inspired by clean gallery UX (not a copy).
  *
  * For CreateDocument we write a .zip that holds the gallery folder structure,
@@ -227,7 +227,7 @@ $cards
     companion object {
         private const val TAG = "HtmlGalleryExporter"
 
-        private val STYLE_CSS = """
+        private val STYLE_CSS: String = """
 :root {
   --bg: #F6F4EE;
   --card: #E8E4D9;
@@ -246,7 +246,9 @@ $cards
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 20px rgba(0,0,0,.35);
   }
 }
-* { box-sizing: border-box; }
+html, body, div, article, button, img, header, main {
+  box-sizing: border-box;
+}
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
@@ -331,16 +333,18 @@ body {
 }
 """.trimIndent()
 
-        private val SCRIPT_JS = """
+        private val SCRIPT_JS: String = """
 (function () {
-  const lb = document.getElementById("lightbox");
-  const img = document.getElementById("lb-img");
-  const cap = document.getElementById("lb-caption");
-  const thumbs = Array.from(document.querySelectorAll(".thumb"));
-  let index = 0;
-  const items = thumbs.map(t => ({ src: t.dataset.src, name: t.dataset.name || "" }));
+  var lb = document.getElementById("lightbox");
+  var img = document.getElementById("lb-img");
+  var cap = document.getElementById("lb-caption");
+  var thumbs = Array.prototype.slice.call(document.querySelectorAll(".thumb"));
+  var index = 0;
+  var items = thumbs.map(function (t) {
+    return { src: t.getAttribute("data-src"), name: t.getAttribute("data-name") || "" };
+  });
 
-  function open(i) {
+  function openAt(i) {
     if (!items.length) return;
     index = (i + items.length) % items.length;
     img.src = items[index].src;
@@ -348,18 +352,20 @@ body {
     cap.textContent = items[index].name + " (" + (index + 1) + "/" + items.length + ")";
     lb.hidden = false;
   }
-  function close() { lb.hidden = true; img.src = ""; }
-  function prev() { open(index - 1); }
-  function next() { open(index + 1); }
+  function closeLb() { lb.hidden = true; img.src = ""; }
+  function prev() { openAt(index - 1); }
+  function next() { openAt(index + 1); }
 
-  thumbs.forEach((t, i) => t.addEventListener("click", () => open(i)));
-  document.querySelector(".lb-close").addEventListener("click", close);
+  thumbs.forEach(function (t, i) {
+    t.addEventListener("click", function () { openAt(i); });
+  });
+  document.querySelector(".lb-close").addEventListener("click", closeLb);
   document.querySelector(".lb-prev").addEventListener("click", prev);
   document.querySelector(".lb-next").addEventListener("click", next);
-  lb.addEventListener("click", e => { if (e.target === lb) close(); });
-  document.addEventListener("keydown", e => {
+  lb.addEventListener("click", function (e) { if (e.target === lb) closeLb(); });
+  document.addEventListener("keydown", function (e) {
     if (lb.hidden) return;
-    if (e.key === "Escape") close();
+    if (e.key === "Escape") closeLb();
     if (e.key === "ArrowLeft") prev();
     if (e.key === "ArrowRight") next();
   });
