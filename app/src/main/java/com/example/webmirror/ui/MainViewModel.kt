@@ -196,6 +196,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(formatFilter = DownloadFormatFilter()) }
     }
 
+    fun openStaging(source: String = "all") {
+        setStagingSource(source)
+        refreshStaging()
+    }
+
     fun setStagingSource(source: String) {
         _uiState.update { it.copy(stagingSource = source, selectedIds = emptySet()) }
         refreshStaging()
