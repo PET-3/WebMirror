@@ -69,7 +69,8 @@ data class UiState(
     val logRetentionDays: Int = 7,
     val formatFilter: DownloadFormatFilter = DownloadFormatFilter(),
     val stagingSource: String = "all", // all | static | browser
-    val stagingViewMode: String = "list" // list | folder
+    val stagingViewMode: String = "list", // list | folder
+    val selectedExtension: String? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -206,6 +207,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     
     /** Pin + select all resources with given extension (e.g. "png"). */
+    fun selectExtensionGroup(exts: List<String>) {
+        val set = exts.map { it.lowercase().removePrefix(".") }.toSet()
+        val all = _uiState.value.stagingResources
+        val matched = all.filter {
+            FileTypeFilter.extensionOf(it.localPath ?: it.url) in set
+        }
+        val ids = matched.map { it.id }.toSet()
+        _uiState.update {
+            it.copy(
+                selectedIds = ids,
+                selectedExtension = null,
+                filter = it.filter.copy(category = ResourceCategory.ALL, imageExtensions = emptySet())
+            )
+        }
+        if (ids.isEmpty()) showToast("暂无匹配后缀组的文件")
+    }
+
     fun selectExtensionAndPin(ext: String) {
         val e = ext.lowercase().removePrefix(".")
         val all = _uiState.value.stagingResources
@@ -213,32 +231,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             FileTypeFilter.extensionOf(it.localPath ?: it.url) == e
         }
         val ids = matched.map { it.id }.toSet()
-        val cat = when (e) {
-            in FileTypeFilter.IMAGE_EXTENSIONS -> ResourceCategory.IMAGE
-            "html", "htm" -> ResourceCategory.HTML
-            "css" -> ResourceCategory.CSS
-            "js", "mjs" -> ResourceCategory.JS
-            in listOf("ktx", "ktx2", "basis", "glb", "gltf", "wasm", "bin") -> ResourceCategory.TEXTURE
-            else -> ResourceCategory.ALL
-        }
-        // For non-image extensions, still select by exact extension match (ids already filtered)
         _uiState.update {
             it.copy(
                 selectedIds = ids,
-                filter = it.filter.copy(
-                    category = cat,
-                    imageExtensions = if (e in FileTypeFilter.IMAGE_EXTENSIONS) setOf(e) else emptySet()
-                )
+                selectedExtension = e,
+                filter = it.filter.copy(category = ResourceCategory.ALL, imageExtensions = emptySet())
             )
         }
         if (ids.isEmpty()) {
             showToast("暂无 .$e 文件")
         }
-    }
-
-    fun openStaging(source: String = "all") {
-        setStagingSource(source)
-        refreshStaging()
     }
 
     fun selectCategoryAndPin(category: ResourceCategory) {
@@ -370,6 +372,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setCategory(cat: ResourceCategory) {
         _uiState.update {
             it.copy(
+                selectedExtension = null,
                 filter = it.filter.copy(
                     category = cat,
                     imageExtensions = if (cat != ResourceCategory.IMAGE) emptySet() else it.filter.imageExtensions
@@ -403,7 +406,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val s = _uiState.value
         var list = s.stagingResources.filter { res ->
             val path = res.localPath ?: return@filter false
-            s.filter.matches(path, res.contentType)
+            val extOk = s.selectedExtension == null ||
+                FileTypeFilter.extensionOf(path) == s.selectedExtension
+            extOk && s.filter.matches(path, res.contentType)
         }
         val q = s.resourceQuery.trim().lowercase()
         if (q.isNotEmpty()) {

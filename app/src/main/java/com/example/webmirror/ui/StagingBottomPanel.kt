@@ -1,5 +1,6 @@
 package com.example.webmirror.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,7 +17,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -28,7 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.example.webmirror.model.FileTypeFilter
 
 /**
- * Compact staging strip shown at the bottom of static / browser mode pages.
+ * Full-ish staging strip at bottom of tool pages. Hidden when empty.
  */
 @Composable
 fun StagingBottomPanel(
@@ -42,7 +43,10 @@ fun StagingBottomPanel(
     LaunchedEffect(source) {
         viewModel.openStaging(source)
     }
-    val items = state.stagingResources.take(12)
+    val total = state.stagingResources.size
+    if (total == 0) return
+
+    val preview = state.stagingResources.take(20)
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -59,36 +63,31 @@ fun StagingBottomPanel(
             ) {
                 Text(title, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${state.stagingResources.size} 个资源",
+                    "$total 个资源",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Spacer(Modifier.height(8.dp))
-            if (items.isEmpty()) {
-                Text(
-                    "暂无资源。下载或捕获后会显示在这里。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(items, key = { it.id }) { res ->
-                        val name = FileTypeFilter.displayName(res.localPath ?: res.url)
-                        Card(
-                            shape = RoundedCornerShape(10.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            )
-                        ) {
-                            Text(
-                                name,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(preview, key = { it.id }) { res ->
+                    val name = FileTypeFilter.displayName(res.localPath ?: res.url)
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        modifier = Modifier.clickable(onClick = onOpenFull)
+                    ) {
+                        Text(
+                            name,
+                            modifier = Modifier
+                                .width(120.dp)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelMedium
+                        )
                     }
                 }
             }

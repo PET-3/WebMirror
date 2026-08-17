@@ -73,6 +73,7 @@ fun StaticDownloadScreen(
     onBack: () -> Unit = {},
     onOpenResources: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    embedded: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -93,21 +94,23 @@ fun StaticDownloadScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text("静态下载", fontWeight = FontWeight.SemiBold)
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+            if (!embedded) {
+                TopAppBar(
+                    title = {
+                        Text("静态下载", fontWeight = FontWeight.SemiBold)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Default.Settings, contentDescription = "设置")
+                        }
                     }
-                },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
-                    }
-                }
-            )
+                )
+            }
         }
     ) { innerPadding ->
         Column(

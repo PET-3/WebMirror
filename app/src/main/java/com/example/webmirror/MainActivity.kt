@@ -8,25 +8,22 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.example.webmirror.ui.BrowserCaptureScreen
-import com.example.webmirror.ui.BrowserModeScreen
 import com.example.webmirror.ui.MainViewModel
-import com.example.webmirror.ui.ModeHomeScreen
 import com.example.webmirror.ui.ResourcesScreen
 import com.example.webmirror.ui.SettingsScreen
-import com.example.webmirror.ui.StaticDownloadScreen
+import com.example.webmirror.ui.ToolsPagerScreen
 import com.example.webmirror.ui.theme.WebMirrorTheme
 import com.example.webmirror.util.StoragePaths
 
@@ -86,66 +83,78 @@ class MainActivity : ComponentActivity() {
         setContent {
             WebMirrorTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    var screen by remember { mutableStateOf("home") }
-                    when (screen) {
-                        "resources" -> ResourcesScreen(
+                    // Stack-based navigation: edge swipe / system back = pop, not always exit
+                    val stack = remember { mutableStateListOf("tools") }
+
+                    fun push(route: String) {
+                        if (stack.lastOrNull() != route) stack.add(route)
+                    }
+
+                    fun pop() {
+                        if (stack.size > 1) stack.removeAt(stack.lastIndex)
+                        else finish()
+                    }
+
+                    BackHandler {
+                        pop()
+                    }
+
+                    val current = stack.last()
+                    when {
+                        current == "tools" -> ToolsPagerScreen(
                             viewModel = viewModel,
-                            onBack = { screen = "home" },
+                            onOpenResources = { source ->
+                                viewModel.openStaging(source)
+                                push("resources")
+                            },
+                            onOpenSettings = { push("settings") },
+                            onStartBrowserCapture = {
+                                val u = viewModel.uiState.value.url.trim()
+                                if (u.isBlank()) {
+                                    viewModel.showToast("请先输入网站 URL")
+                                } else {
+                                    push("browser_capture")
+                                }
+                            }
+                        )
+                        current == "resources" -> ResourcesScreen(
+                            viewModel = viewModel,
+                            onBack = { pop() },
                             onRequestExportDocument = { _, name ->
                                 createDocumentLauncher.launch(name)
                             }
                         )
-                        "settings" -> SettingsScreen(
+                        current == "settings" -> SettingsScreen(
                             viewModel = viewModel,
-                            onBack = { screen = "home" },
+                            onBack = { pop() },
                             onPickSaveDirectory = { openTreeLauncher.launch(null) },
                             onRequestStoragePermission = { requestStoragePermission() }
                         )
-                        "static" -> StaticDownloadScreen(
-                            viewModel = viewModel,
-                            onBack = { screen = "home" },
-                            onOpenResources = {
-                                viewModel.openStaging("static")
-                                screen = "resources"
-                            },
-                            onOpenSettings = { screen = "settings" }
-                        )
-                        "browser_setup" -> BrowserModeScreen(
-                            viewModel = viewModel,
-                            onBack = { screen = "home" },
-                            onStartCapture = { screen = "browser_capture" },
-                            onOpenSettings = { screen = "settings" },
-                            onOpenResources = {
-                                viewModel.openStaging("browser")
-                                screen = "resources"
-                            }
-                        )
-                        "browser_capture" -> {
+                        current == "browser_capture" -> {
                             val state = viewModel.uiState.value
                             BrowserCaptureScreen(
                                 startUrl = state.url,
                                 outputDir = viewModel.mirrorBrowserRoot(),
                                 sameHostOnly = state.sameDomainOnly,
-                                onClose = { screen = "browser_setup" },
+                                onClose = { pop() },
                                 onFinished = { count ->
                                     viewModel.onBrowserCaptureFinished(count)
-                                    screen = "resources"
+                                    // Replace capture with resources on stack
+                                    if (stack.lastOrNull() == "browser_capture") {
+                                        stack.removeAt(stack.lastIndex)
+                                    }
+                                    viewModel.openStaging("browser")
+                                    push("resources")
                                 },
                                 onResourceSaved = { url, bytes ->
                                     viewModel.recordCapturedResource(url, bytes)
                                 }
                             )
                         }
-                        else -> ModeHomeScreen(
-                            viewModel = viewModel,
-                            onOpenStatic = { screen = "static" },
-                            onOpenBrowser = { screen = "browser_setup" },
-                            onOpenResources = {
-                                viewModel.refreshStaging()
-                                screen = "resources"
-                            },
-                            onOpenSettings = { screen = "settings" }
-                        )
+                        else -> {
+                            stack.clear()
+                            stack.add("tools")
+                        }
                     }
                 }
             }

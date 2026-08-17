@@ -56,6 +56,7 @@ fun BrowserModeScreen(
     onStartCapture: () -> Unit,
     onOpenSettings: () -> Unit = {},
     onOpenResources: () -> Unit = {},
+    embedded: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -74,19 +75,21 @@ fun BrowserModeScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("浏览器捕获", fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+            if (!embedded) {
+                TopAppBar(
+                    title = { Text("浏览器捕获", fontWeight = FontWeight.SemiBold) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Default.Settings, contentDescription = "设置")
+                        }
                     }
-                },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "设置")
-                    }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
         Column(

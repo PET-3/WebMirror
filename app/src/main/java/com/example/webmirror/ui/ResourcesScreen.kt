@@ -201,22 +201,85 @@ fun ResourcesScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(4.dp))
-            Text("扩展名（点选即勾选并置顶）", style = MaterialTheme.typography.labelMedium)
+            // Custom suffix chips (user-added) + suffix groups
+            var showAddExt by remember { mutableStateOf(false) }
+            var newExt by remember { mutableStateOf("") }
+            var extraExts by remember { mutableStateOf(listOf<String>()) }
+
+            Text("后缀", style = MaterialTheme.typography.labelMedium)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                (listOf(
+                    "png", "jpg", "jpeg", "webp", "gif", "svg",
+                    "html", "css", "js", "ktx", "ktx2", "glb", "wasm", "woff2", "mp4", "webm"
+                ) + extraExts).distinct().forEach { ext ->
+                    FilterChip(
+                        selected = ext == state.selectedExtension,
+                        onClick = { viewModel.selectExtensionAndPin(ext) },
+                        label = { Text(ext.uppercase()) }
+                    )
+                }
+                FilterChip(
+                    selected = false,
+                    onClick = { showAddExt = true; newExt = "" },
+                    label = { Text("+ 增加") }
+                )
+            }
+
+            Text("后缀组", style = MaterialTheme.typography.labelMedium)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 listOf(
-                    "png", "jpg", "jpeg", "webp", "gif", "svg",
-                    "html", "css", "js", "ktx", "ktx2", "glb", "wasm", "woff2", "mp4", "webm"
-                ).forEach { ext ->
+                    "图片" to listOf("png", "jpg", "jpeg", "webp", "gif", "svg"),
+                    "网页" to listOf("html", "htm", "css", "js"),
+                    "纹理3D" to listOf("ktx", "ktx2", "basis", "glb", "gltf", "wasm"),
+                    "音视频" to listOf("mp3", "mp4", "webm", "wav")
+                ).forEach { (label, exts) ->
                     FilterChip(
-                        selected = ext in state.filter.imageExtensions,
-                        onClick = { viewModel.selectExtensionAndPin(ext) },
-                        label = { Text(ext.uppercase()) }
+                        selected = false,
+                        onClick = { viewModel.selectExtensionGroup(exts) },
+                        label = { Text(label) }
                     )
                 }
+                FilterChip(
+                    selected = false,
+                    onClick = { showAddExt = true; newExt = "" },
+                    label = { Text("+ 增加组") }
+                )
+            }
+
+            if (showAddExt) {
+                AlertDialog(
+                    onDismissRequest = { showAddExt = false },
+                    title = { Text("增加后缀") },
+                    text = {
+                        OutlinedTextField(
+                            value = newExt,
+                            onValueChange = { newExt = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("后缀") },
+                            placeholder = { Text("如 ktx2 或 data") },
+                            singleLine = true
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val e = newExt.trim().removePrefix(".").lowercase()
+                            if (e.isNotEmpty()) {
+                                extraExts = (extraExts + e).distinct()
+                                viewModel.selectExtensionAndPin(e)
+                            }
+                            showAddExt = false
+                        }) { Text("添加") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAddExt = false }) { Text("取消") }
+                    }
+                )
             }
             Spacer(Modifier.height(8.dp))
 
@@ -365,18 +428,21 @@ fun ResourcesScreen(
     }
 }
 
-/** Explicit □ / ✓ checkbox so multi-select is obvious. */
+/**
+ * Google Keep–style checklist mark: empty square / filled check.
+ * Label sits beside the box (□ XXX  /  ☑ XXX).
+ */
 @Composable
 fun SquareCheck(checked: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .size(24.dp)
-            .clip(RoundedCornerShape(4.dp))
+            .size(22.dp)
+            .clip(RoundedCornerShape(3.dp))
             .border(
-                width = 2.dp,
+                width = 1.5.dp,
                 color = if (checked) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.outline,
-                shape = RoundedCornerShape(4.dp)
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(3.dp)
             )
             .background(
                 if (checked) MaterialTheme.colorScheme.primary else Color.Transparent
@@ -389,8 +455,46 @@ fun SquareCheck(checked: Boolean, onToggle: () -> Unit, modifier: Modifier = Mod
                 Icons.Default.Check,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(15.dp)
             )
+        }
+    }
+}
+
+@Composable
+fun KeepCheckRow(
+    checked: Boolean,
+    label: String,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    secondary: String? = null
+) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = 6.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SquareCheck(checked = checked, onToggle = onToggle)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (!secondary.isNullOrBlank()) {
+                Text(
+                    secondary,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -411,8 +515,7 @@ private fun ResourceRow(
         Modifier
             .fillMaxWidth()
             .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                else MaterialTheme.colorScheme.surfaceContainerLow,
+                MaterialTheme.colorScheme.surfaceContainerLow,
                 RoundedCornerShape(12.dp)
             )
             .clickable(onClick = onToggle)
