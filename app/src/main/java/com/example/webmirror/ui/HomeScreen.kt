@@ -71,6 +71,7 @@ fun HomeScreen(
     viewModel: MainViewModel,
     onPickDirectory: () -> Unit,
     onOpenResources: () -> Unit = {},
+    onOpenBrowserCapture: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -179,6 +180,18 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.size(8.dp))
                             Text(stringResource(R.string.start_download))
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                focusManager.clearFocus()
+                                onOpenBrowserCapture()
+                            },
+                            enabled = !isDownloading && state.url.isNotBlank(),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("浏览器捕获")
                         }
 
                         AnimatedVisibility(visible = isDownloading) {
@@ -631,7 +644,8 @@ if (state.stats.status == EngineStatus.Running || state.stats.status == EngineSt
                                 "• 文件先写在「工作目录」（应用私有 Documents/WebMirror）\n" +
                                 "• 若选择了导出目录，完成后会自动复制到该目录\n" +
                                 "• 用电脑浏览：把镜像文件夹拷出后 python3 -m http.server\n" +
-                                "• 深度 2~3 + 仅同域名 适合大多数静态站；SPA 站点无法完整还原",
+                                "• 深度 2~3 + 仅同域名 适合大多数静态站；SPA 站点无法完整还原
+• 「浏览器捕获」：用系统 WebView 打开页面并拦截请求落盘（可滚动/点击触发更多资源，含部分 ktx2 等）",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

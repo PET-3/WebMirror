@@ -125,6 +125,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearToast() = _uiState.update { it.copy(toastMessage = null) }
 
+    fun showToast(msg: String) = _uiState.update { it.copy(toastMessage = msg) }
+
     fun mirrorRoot(): File = defaultDir
 
     private fun buildConfig(state: UiState): MirrorConfig {
@@ -508,6 +510,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         } catch (_: Exception) {
             null
+        }
+    }
+
+
+    /**
+     * WebView capture: register a file so it appears in staging (Room).
+     */
+    fun recordCapturedResource(url: String, byteSize: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val normalized = com.example.webmirror.engine.model.UrlNormalizer.normalize(url) ?: url
+                val dao = repo.resourceDao()
+                if (dao.findByNormalizedUrl(normalized) != null) return@launch
+                val rel = com.example.webmirror.engine.model.LocalPathMapper.toRelativePath(normalized)
+                dao.insert(
+                    com.example.webmirror.data.ResourceEntity(
+                        url = url,
+                        normalizedUrl = normalized,
+                        localPath = rel,
+                        depth = 0,
+                        status = com.example.webmirror.data.ResourceStatus.DOWNLOADED.name,
+                        contentLength = byteSize.toLong(),
+                        contentType = null
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("MainViewModel", "recordCaptured: ${e.message}")
+            }
+        }
+    }
+
+    fun onBrowserCaptureFinished(count: Int) {
+        refreshStaging()
+        _uiState.update {
+            it.copy(toastMessage = "浏览器捕获结束：约 $count 个资源，可打开资源暂存")
         }
     }
 

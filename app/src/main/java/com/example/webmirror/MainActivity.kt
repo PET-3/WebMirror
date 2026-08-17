@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import com.example.webmirror.ui.BrowserCaptureScreen
 import com.example.webmirror.ui.HomeScreen
 import com.example.webmirror.ui.MainViewModel
 import com.example.webmirror.ui.ResourcesScreen
@@ -72,12 +73,36 @@ class MainActivity : ComponentActivity() {
                                 createDocumentLauncher.launch(name)
                             }
                         )
+                        "browser" -> {
+                            val state = viewModel.uiState.value
+                            BrowserCaptureScreen(
+                                startUrl = state.url,
+                                outputDir = viewModel.mirrorRoot(),
+                                sameHostOnly = state.sameDomainOnly,
+                                onClose = { screen = "home" },
+                                onFinished = { count ->
+                                    viewModel.onBrowserCaptureFinished(count)
+                                    screen = "home"
+                                },
+                                onResourceSaved = { url, bytes ->
+                                    viewModel.recordCapturedResource(url, bytes)
+                                }
+                            )
+                        }
                         else -> HomeScreen(
                             viewModel = viewModel,
                             onPickDirectory = { openTreeLauncher.launch(null) },
                             onOpenResources = {
                                 viewModel.refreshStaging()
                                 screen = "resources"
+                            },
+                            onOpenBrowserCapture = {
+                                val u = viewModel.uiState.value.url.trim()
+                                if (u.isBlank()) {
+                                    viewModel.showToast("请先输入网站 URL")
+                                } else {
+                                    screen = "browser"
+                                }
                             }
                         )
                     }
