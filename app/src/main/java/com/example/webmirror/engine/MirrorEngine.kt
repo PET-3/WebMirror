@@ -47,10 +47,23 @@ data class EngineStats(
     val failed: Int = 0,
     val skipped: Int = 0,
     val total: Int = 0,
+    /** Same as total while crawling; locked when finished. */
+    val discovered: Int = 0,
     val currentUrl: String = "",
     val status: EngineStatus = EngineStatus.Idle,
-    val errorMessage: String? = null
-)
+    val errorMessage: String? = null,
+    /** Bytes successfully written so far. */
+    val bytesDownloaded: Long = 0L,
+    /** Estimated total bytes if Content-Length known for remaining; 0 if unknown. */
+    val bytesTotalKnown: Long = 0L,
+    /** Instantaneous-ish download speed in bytes/sec. */
+    val speedBps: Long = 0L
+) {
+    /** completed terminal count for progress bar denominator uses total. */
+    val finishedCount: Int get() = downloaded + failed + skipped
+    val progressFraction: Float
+        get() = if (total <= 0) 0f else (finishedCount.toFloat() / total).coerceIn(0f, 1f)
+}
 
 enum class EngineStatus {
     Idle, Running, Paused, Completed, Cancelled, Error
@@ -556,17 +569,39 @@ class MirrorEngine(context: Context) {
     }
 
     private suspend fun refreshStats(status: EngineStatus) {
+        val prev = _stats.value
+        val now = System.currentTimeMillis()
+        val downloaded = queue.downloadedCount()
+        val failed = queue.failedCount()
+        val skipped = resourceDao.countByStatus(ResourceStatus.SKIPPED.name)
+        val total = queue.totalCount()
+        val bytes = try { resourceDao.sumDownloadedBytes() } catch (_: Exception) { prev.bytesDownloaded }
+        // rough speed from delta since last refresh
+        val dt = (now - lastStatsAt).coerceAtLeast(1L)
+        val speed = if (lastStatsAt > 0 && bytes >= lastBytes) {
+            ((bytes - lastBytes) * 1000L) / dt
+        } else prev.speedBps
+        lastStatsAt = now
+        lastBytes = bytes
         _stats.value = EngineStats(
             queued = queue.queuedCount(),
             downloading = resourceDao.countByStatus(ResourceStatus.DOWNLOADING.name),
-            downloaded = queue.downloadedCount(),
-            failed = queue.failedCount(),
-            skipped = resourceDao.countByStatus(ResourceStatus.SKIPPED.name),
-            total = queue.totalCount(),
-            currentUrl = _stats.value.currentUrl,
-            status = status
+            downloaded = downloaded,
+            failed = failed,
+            skipped = skipped,
+            total = total,
+            discovered = total,
+            currentUrl = prev.currentUrl,
+            status = status,
+            errorMessage = prev.errorMessage,
+            bytesDownloaded = bytes,
+            bytesTotalKnown = 0L,
+            speedBps = speed
         )
     }
+
+    @Volatile private var lastStatsAt: Long = 0L
+    @Volatile private var lastBytes: Long = 0L
 //
     private suspend fun <T> coroutineScopeSafe(block: suspend kotlinx.coroutines.CoroutineScope.() -> T): T {
         return kotlinx.coroutines.coroutineScope(block)

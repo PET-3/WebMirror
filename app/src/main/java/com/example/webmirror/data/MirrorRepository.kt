@@ -64,4 +64,22 @@ class MirrorRepository(context: Context) {
 
     fun resourceDao() = db.resourceDao()
     fun projectDao() = db.projectDao()
+
+    suspend fun allDownloadedResources() = db.resourceDao().allDownloaded()
+
+    /**
+     * Remove from export staging conceptually: optional physical delete of mirror file.
+     * Default is DB row only when [deleteFiles] is false — keeps mirror intact.
+     */
+    suspend fun removeResources(ids: List<Long>, mirrorRoot: File, deleteFiles: Boolean) {
+        if (ids.isEmpty()) return
+        if (deleteFiles) {
+            for (id in ids) {
+                val row = db.resourceDao().findById(id) ?: continue
+                val rel = row.localPath ?: continue
+                runCatching { File(mirrorRoot, rel).delete() }
+            }
+        }
+        db.resourceDao().deleteByIds(ids)
+    }
 }

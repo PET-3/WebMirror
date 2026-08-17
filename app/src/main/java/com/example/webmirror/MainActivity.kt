@@ -12,10 +12,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.example.webmirror.ui.HomeScreen
 import com.example.webmirror.ui.MainViewModel
+import com.example.webmirror.ui.ResourcesScreen
 import com.example.webmirror.ui.theme.WebMirrorTheme
 
 class MainActivity : ComponentActivity() {
@@ -30,7 +35,7 @@ class MainActivity : ComponentActivity() {
                 contentResolver.takePersistableUriPermission(
                     uri,
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
             } catch (_: SecurityException) {
             }
@@ -39,9 +44,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val createDocumentLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("*/*")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.startExportToUri(uri)
+        }
+    }
+
     private val notifPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* ignore result; service still works with limited notif on deny */ }
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,10 +63,24 @@ class MainActivity : ComponentActivity() {
         setContent {
             WebMirrorTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    HomeScreen(
-                        viewModel = viewModel,
-                        onPickDirectory = { openTreeLauncher.launch(null) }
-                    )
+                    var screen by remember { mutableStateOf("home") }
+                    when (screen) {
+                        "resources" -> ResourcesScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = "home" },
+                            onRequestExportDocument = { mime, name ->
+                                createDocumentLauncher.launch(name)
+                            }
+                        )
+                        else -> HomeScreen(
+                            viewModel = viewModel,
+                            onPickDirectory = { openTreeLauncher.launch(null) },
+                            onOpenResources = {
+                                viewModel.refreshStaging()
+                                screen = "resources"
+                            }
+                        )
+                    }
                 }
             }
         }

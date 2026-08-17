@@ -70,6 +70,7 @@ import com.example.webmirror.engine.model.RunMode
 fun HomeScreen(
     viewModel: MainViewModel,
     onPickDirectory: () -> Unit,
+    onOpenResources: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -471,13 +472,27 @@ fun HomeScreen(
     fontWeight = FontWeight.SemiBold
 )
 
-if (state.stats.status == EngineStatus.Running) {
+if (state.stats.status == EngineStatus.Running || state.stats.status == EngineStatus.Paused) {
+    val finished = state.stats.downloaded + state.stats.failed + state.stats.skipped
+    val total = state.stats.total.coerceAtLeast(1)
+    val pct = ((finished * 100f) / total).toInt().coerceIn(0, 100)
+    Text(
+        text = "$finished / ${state.stats.total}",
+        style = MaterialTheme.typography.headlineSmall,
+        fontWeight = FontWeight.Bold
+    )
     LinearProgressIndicator(
+        progress = { state.stats.progressFraction },
         modifier = Modifier.fillMaxWidth(),
         trackColor = MaterialTheme.colorScheme.surfaceVariant
     )
     Text(
-        text = "队列 ${state.stats.queued} · 已下载 ${state.stats.downloaded} · 失败 ${state.stats.failed} · 跳过 ${state.stats.skipped} · 共 ${state.stats.total}",
+        text = "$pct% · 队列 ${state.stats.queued} · 下载中 ${state.stats.downloading} · 失败 ${state.stats.failed} · 跳过 ${state.stats.skipped} · 已发现 ${state.stats.discovered}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Text(
+        text = formatSpeedSize(state.stats.bytesDownloaded, state.stats.speedBps),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -509,9 +524,21 @@ if (state.stats.status == EngineStatus.Running) {
                         state.stats.status == EngineStatus.Cancelled
                     ) {
                         Text(
-                            text = "共保存 ${state.stats.downloaded} 个文件",
+                            text = "共保存 ${state.stats.downloaded} 个文件 · 失败 ${state.stats.failed} · 跳过 ${state.stats.skipped}",
                             style = MaterialTheme.typography.bodyMedium
                         )
+                        if (state.stats.status == EngineStatus.Completed) {
+                            Button(
+                                onClick = {
+                                    viewModel.refreshStaging()
+                                    onOpenResources()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("查看资源 / 导出")
+                            }
+                        }
                         state.stats.errorMessage?.let {
                             Text(
                                 text = it,
@@ -614,4 +641,17 @@ if (state.stats.status == EngineStatus.Running) {
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
+}
+
+private fun formatSpeedSize(bytes: Long, speedBps: Long): String {
+    fun fmt(b: Long): String {
+        if (b < 1024) return "$b B"
+        val kb = b / 1024.0
+        if (kb < 1024) return String.format("%.1f KB", kb)
+        val mb = kb / 1024.0
+        if (mb < 1024) return String.format("%.2f MB", mb)
+        return String.format("%.2f GB", mb / 1024.0)
+    }
+    val speed = if (speedBps <= 0) "—" else fmt(speedBps) + "/s"
+    return "已下载 ${fmt(bytes)} · 速度 $speed"
 }

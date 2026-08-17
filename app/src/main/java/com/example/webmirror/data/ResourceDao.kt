@@ -111,6 +111,21 @@ interface ResourceDao {
 
     @Query("SELECT * FROM resources WHERE status = 'DOWNLOADED' AND etag IS NOT NULL LIMIT :limit")
     suspend fun downloadedWithEtag(limit: Int = 1000): List<ResourceEntity>
+
+    @Query("SELECT * FROM resources WHERE status = 'DOWNLOADED' AND local_path IS NOT NULL ORDER BY updated_at DESC")
+    suspend fun allDownloaded(): List<ResourceEntity>
+
+    @Query("SELECT * FROM resources WHERE status = 'DOWNLOADED' AND local_path IS NOT NULL ORDER BY updated_at DESC")
+    fun observeDownloaded(): Flow<List<ResourceEntity>>
+
+    @Query("SELECT COALESCE(SUM(content_length), 0) FROM resources WHERE status = 'DOWNLOADED'")
+    suspend fun sumDownloadedBytes(): Long
+
+    @Query("DELETE FROM resources WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM resources WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
 }
 
 data class UrlPathPair(

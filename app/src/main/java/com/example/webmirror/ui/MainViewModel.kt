@@ -10,6 +10,7 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.webmirror.data.MirrorRepository
+import com.example.webmirror.data.ResourceEntity
 import com.example.webmirror.engine.EngineStats
 import com.example.webmirror.engine.EngineStatus
 import com.example.webmirror.engine.log.MirrorLogger
@@ -19,7 +20,16 @@ import com.example.webmirror.engine.model.DomainPolicy
 import com.example.webmirror.engine.model.MirrorConfig
 import com.example.webmirror.engine.model.RunMode
 import com.example.webmirror.engine.service.MirrorForegroundService
+import com.example.webmirror.export.ExportFormat
+import com.example.webmirror.export.ExportManager
+import com.example.webmirror.export.ExportProgress
+import com.example.webmirror.export.ExportRequest
+import com.example.webmirror.export.ExportScope
+import com.example.webmirror.model.FileTypeFilter
+import com.example.webmirror.model.ResourceCategory
+import com.example.webmirror.model.ResourceSort
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,12 +46,18 @@ data class UiState(
     val rewriteLinks: Boolean = true,
     val respectRobots: Boolean = true,
     val stats: EngineStats = EngineStats(),
-    /** Always the real on-disk path where the engine writes files. */
     val downloadDirDisplay: String = "",
     val treeUri: Uri? = null,
     val treeDisplayName: String? = null,
     val lastExportPath: String? = null,
-    val toastMessage: String? = null
+    val toastMessage: String? = null,
+    // Staging / resources
+    val stagingResources: List<ResourceEntity> = emptyList(),
+    val selectedIds: Set<Long> = emptySet(),
+    val filter: FileTypeFilter = FileTypeFilter(),
+    val resourceQuery: String = "",
+    val resourceSort: ResourceSort = ResourceSort.TIME_DESC,
+    val exportProgress: ExportProgress? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -49,30 +65,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = MirrorRepository(application)
     private val logger = MirrorLogger.get(application)
     private val defaultDir = getDefaultDownloadDir()
+    private val exportManager = ExportManager.createDefault()
 
     private val _uiState = MutableStateFlow(
         UiState(downloadDirDisplay = defaultDir.absolutePath)
     )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    /** Avoid exporting the same completion multiple times. */
     private var lastHandledStatus: EngineStatus = EngineStatus.Idle
+    private var exportJob: Job? = null
+    @Volatile private var exportCancelled = false
+    private var pendingExportFormat: ExportFormat = ExportFormat.ZIP_STORED
+    private var pendingExportScope: ExportScope = ExportScope.SELECTED
 
     init {
         viewModelScope.launch {
             repo.stats.collect { stats ->
                 _uiState.update { it.copy(stats = stats) }
-                // After successful mirror: export to user-chosen SAF folder if set
                 if (stats.status == EngineStatus.Completed && lastHandledStatus != EngineStatus.Completed) {
                     lastHandledStatus = EngineStatus.Completed
+                    refreshStaging()
                     val tree = _uiState.value.treeUri
                     if (tree != null) {
                         exportMirrorToSaf(tree)
                     } else {
                         _uiState.update {
-                            it.copy(
-                                toastMessage = "完成：文件在 ${defaultDir.absolutePath}"
-                            )
+                            it.copy(toastMessage = "完成：可打开「资源暂存」整理并导出")
                         }
                     }
                 } else if (stats.status != EngineStatus.Completed) {
@@ -94,7 +112,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 treeUri = uri,
                 treeDisplayName = if (uri != null) displayName else null,
-                // Keep showing the real engine path; note user export target separately in UI
                 downloadDirDisplay = defaultDir.absolutePath
             )
         }
@@ -102,15 +119,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearTreeUri() {
         _uiState.update {
-            it.copy(
-                treeUri = null,
-                treeDisplayName = null,
-                downloadDirDisplay = defaultDir.absolutePath
-            )
+            it.copy(treeUri = null, treeDisplayName = null, downloadDirDisplay = defaultDir.absolutePath)
         }
     }
 
     fun clearToast() = _uiState.update { it.copy(toastMessage = null) }
+
+    fun mirrorRoot(): File = defaultDir
 
     private fun buildConfig(state: UiState): MirrorConfig {
         return MirrorConfig(
@@ -125,13 +140,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /**
-     * Start mirror. Always runs engine in ViewModel scope (reliable),
-     * and best-effort starts ForegroundService for notification.
-     *
-     * Files are always written to app-specific dir (reliable on Android 10+).
-     * If user picked a SAF folder, contents are copied there after completion.
-     */
     fun startDownload(mode: RunMode = RunMode.FRESH) {
         val state = _uiState.value
         val url = state.url.trim()
@@ -148,7 +156,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dir.mkdirs()
         val config = buildConfig(state)
         lastHandledStatus = EngineStatus.Idle
-        logger.i("UI", "startDownload mode=$mode url=$url dir=${dir.absolutePath} export=${state.treeUri}")
+        logger.i("UI", "startDownload mode=$mode url=$url dir=${dir.absolutePath}")
 
         try {
             MirrorForegroundService.start(
@@ -162,21 +170,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 respectRobots = state.respectRobots
             )
         } catch (e: Exception) {
-            Log.w("MainViewModel", "FGS start failed, fallback to in-process engine", e)
-            logger.w("UI", "FGS start failed: ${e.message}")
+            Log.w("MainViewModel", "FGS start failed", e)
         }
 
         viewModelScope.launch {
             try {
-                val tip = if (state.treeUri != null) {
-                    "开始镜像…（完成后会导出到你选择的目录）"
-                } else {
-                    "开始镜像… 保存于 ${dir.absolutePath}"
-                }
                 _uiState.update {
                     it.copy(
-                        toastMessage = tip,
-                        downloadDirDisplay = dir.absolutePath
+                        toastMessage = "开始镜像…",
+                        downloadDirDisplay = dir.absolutePath,
+                        selectedIds = emptySet()
                     )
                 }
                 repo.setRespectRobots(state.respectRobots)
@@ -187,9 +190,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 logger.e("UI", "engine start failed", e)
-                _uiState.update {
-                    it.copy(toastMessage = "启动失败：${e.message ?: "未知错误"}")
-                }
+                _uiState.update { it.copy(toastMessage = "启动失败：${e.message ?: "未知错误"}") }
             }
         }
     }
@@ -213,9 +214,207 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(toastMessage = "继续下载") }
     }
 
-    /**
-     * Copy entire mirror tree from app dir into user-selected SAF folder.
-     */
+    // ——— Staging / resources ———
+
+    fun refreshStaging() {
+        viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) { repo.allDownloadedResources() }
+            _uiState.update { it.copy(stagingResources = list) }
+        }
+    }
+
+    fun updateResourceQuery(q: String) = _uiState.update { it.copy(resourceQuery = q) }
+
+    fun setCategory(cat: ResourceCategory) {
+        _uiState.update {
+            it.copy(
+                filter = it.filter.copy(
+                    category = cat,
+                    imageExtensions = if (cat != ResourceCategory.IMAGE) emptySet() else it.filter.imageExtensions
+                )
+            )
+        }
+    }
+
+    fun toggleImageExt(ext: String) {
+        _uiState.update {
+            val cur = it.filter.imageExtensions
+            val next = if (ext in cur) cur - ext else cur + ext
+            it.copy(filter = it.filter.copy(imageExtensions = next))
+        }
+    }
+
+    fun setSort(sort: ResourceSort) = _uiState.update { it.copy(resourceSort = sort) }
+
+    fun toggleSelection(id: Long) {
+        _uiState.update {
+            val next = if (id in it.selectedIds) it.selectedIds - id else it.selectedIds + id
+            it.copy(selectedIds = next)
+        }
+    }
+
+    fun filteredResources(): List<ResourceEntity> {
+        val s = _uiState.value
+        var list = s.stagingResources.filter { res ->
+            val path = res.localPath ?: return@filter false
+            s.filter.matches(path, res.contentType)
+        }
+        val q = s.resourceQuery.trim().lowercase()
+        if (q.isNotEmpty()) {
+            list = list.filter {
+                val path = it.localPath.orEmpty().lowercase()
+                path.contains(q) || it.normalizedUrl.lowercase().contains(q) ||
+                    FileTypeFilter.extensionOf(path).contains(q.trimStart('.'))
+            }
+        }
+        return when (s.resourceSort) {
+            ResourceSort.TIME_DESC -> list.sortedByDescending { it.updatedAt }
+            ResourceSort.TIME_ASC -> list.sortedBy { it.updatedAt }
+            ResourceSort.NAME_ASC -> list.sortedBy { it.localPath.orEmpty() }
+            ResourceSort.NAME_DESC -> list.sortedByDescending { it.localPath.orEmpty() }
+            ResourceSort.SIZE_DESC -> list.sortedByDescending { it.contentLength ?: 0L }
+            ResourceSort.SIZE_ASC -> list.sortedBy { it.contentLength ?: 0L }
+            ResourceSort.TYPE -> list.sortedBy { FileTypeFilter.extensionOf(it.localPath.orEmpty()) }
+        }
+    }
+
+    fun isAllFilteredSelected(): Boolean {
+        val ids = filteredResources().map { it.id }.toSet()
+        return ids.isNotEmpty() && ids.all { it in _uiState.value.selectedIds }
+    }
+
+    fun toggleSelectAllFiltered() {
+        val ids = filteredResources().map { it.id }.toSet()
+        _uiState.update {
+            if (ids.isNotEmpty() && ids.all { id -> id in it.selectedIds }) {
+                it.copy(selectedIds = it.selectedIds - ids)
+            } else {
+                it.copy(selectedIds = it.selectedIds + ids)
+            }
+        }
+    }
+
+    fun removeSelected(deleteFiles: Boolean) {
+        val ids = _uiState.value.selectedIds.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                if (deleteFiles) {
+                    repo.removeResources(ids, defaultDir, deleteFiles = true)
+                } else {
+                    // Only clear selection — do not touch DB or mirror files
+                }
+            }
+            if (deleteFiles) {
+                _uiState.update {
+                    it.copy(
+                        selectedIds = emptySet(),
+                        stagingResources = it.stagingResources.filter { r -> r.id !in ids.toSet() },
+                        toastMessage = "已删除 ${ids.size} 个镜像文件"
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        selectedIds = emptySet(),
+                        toastMessage = "已移出选择（镜像文件保留）"
+                    )
+                }
+            }
+        }
+    }
+
+    // ——— Export ———
+
+    fun prepareExport(format: ExportFormat, scope: ExportScope) {
+        pendingExportFormat = format
+        pendingExportScope = scope
+    }
+
+    fun suggestExportFileName(format: ExportFormat): String {
+        val host = try {
+            val u = _uiState.value.url.trim().ifBlank { "mirror" }
+            java.net.URI(if (u.startsWith("http")) u else "https://$u").host ?: "mirror"
+        } catch (_: Exception) {
+            "mirror"
+        }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US)
+            .format(java.util.Date())
+        // HTML is packaged as zip of gallery
+        val ext = when (format) {
+            ExportFormat.HTML -> "zip"
+            else -> format.defaultExtension
+        }
+        return "webmirror-$host-$stamp.$ext"
+    }
+
+    fun startExportToUri(uri: Uri) {
+        val format = pendingExportFormat
+        val scope = pendingExportScope
+        val state = _uiState.value
+        val resources = when (scope) {
+            ExportScope.SELECTED -> state.stagingResources.filter { it.id in state.selectedIds }
+            ExportScope.FILTERED -> filteredResources()
+            ExportScope.ENTIRE_MIRROR -> state.stagingResources
+        }
+        if (resources.isEmpty()) {
+            _uiState.update { it.copy(toastMessage = "没有可导出的资源") }
+            return
+        }
+        val exporter = exportManager.exporterFor(format)
+        if (exporter == null) {
+            _uiState.update { it.copy(toastMessage = "不支持的导出格式") }
+            return
+        }
+
+        exportCancelled = false
+        exportJob?.cancel()
+        exportJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(exportProgress = ExportProgress(0, resources.size, "准备导出…"))
+            }
+            val result = withContext(Dispatchers.IO) {
+                exporter.export(
+                    context = getApplication(),
+                    request = ExportRequest(
+                        format = format,
+                        scope = scope,
+                        resources = resources,
+                        mirrorRoot = defaultDir,
+                        outputUri = uri,
+                        title = "WebMirror · $format"
+                    ),
+                    onProgress = { p ->
+                        _uiState.update { it.copy(exportProgress = p) }
+                    },
+                    isCancelled = { exportCancelled }
+                )
+            }
+            _uiState.update {
+                it.copy(
+                    exportProgress = result,
+                    toastMessage = when {
+                        result.cancelled -> "导出已取消"
+                        result.error != null -> "导出失败：${result.error}"
+                        else -> "导出完成"
+                    },
+                    lastExportPath = uri.toString()
+                )
+            }
+        }
+    }
+
+    fun cancelExport() {
+        exportCancelled = true
+        exportJob?.cancel()
+        _uiState.update {
+            it.copy(
+                exportProgress = it.exportProgress?.copy(cancelled = true, done = true, message = "已取消"),
+                toastMessage = "已取消导出"
+            )
+        }
+    }
+
     private fun exportMirrorToSaf(treeUri: Uri) {
         viewModelScope.launch {
             _uiState.update { it.copy(toastMessage = "正在导出到所选目录…") }
@@ -224,14 +423,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val app = getApplication<Application>()
                     val root = DocumentFile.fromTreeUri(app, treeUri)
                         ?: return@withContext "无法打开所选目录"
-                    val srcRoot = defaultDir
-                    if (!srcRoot.exists()) return@withContext "源目录不存在"
                     var count = 0
-                    count += copyDirToDocument(srcRoot, root, app)
-                    "已导出 $count 个文件到所选目录（本地缓存仍在 ${srcRoot.absolutePath}）"
+                    count += copyDirToDocument(defaultDir, root, app)
+                    "已导出 $count 个文件到所选目录"
                 } catch (e: Exception) {
-                    logger.e("UI", "SAF export failed", e)
-                    "导出失败：${e.message ?: "未知错误"}"
+                    "导出失败：${e.message}"
                 }
             }
             _uiState.update { it.copy(toastMessage = result) }
@@ -244,26 +440,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         for (child in children) {
             if (child.isDirectory) {
                 var sub = destDir.findFile(child.name)
-                if (sub == null || !sub.isDirectory) {
-                    sub = destDir.createDirectory(child.name)
-                }
-                if (sub != null) {
-                    n += copyDirToDocument(child, sub, app)
-                }
+                if (sub == null || !sub.isDirectory) sub = destDir.createDirectory(child.name)
+                if (sub != null) n += copyDirToDocument(child, sub, app)
             } else if (child.isFile) {
                 val mime = guessMime(child.name)
                 var target = destDir.findFile(child.name)
-                if (target == null) {
-                    target = destDir.createFile(mime, child.name)
-                }
+                if (target == null) target = destDir.createFile(mime, child.name)
                 if (target != null) {
                     try {
                         app.contentResolver.openOutputStream(target.uri, "wt")?.use { os ->
                             child.inputStream().use { it.copyTo(os) }
                         }
                         n++
-                    } catch (e: Exception) {
-                        Log.w("MainViewModel", "copy failed ${child.name}: ${e.message}")
+                    } catch (_: Exception) {
                     }
                 }
             }
@@ -276,17 +465,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return when {
             lower.endsWith(".html") || lower.endsWith(".htm") -> "text/html"
             lower.endsWith(".css") -> "text/css"
-            lower.endsWith(".js") || lower.endsWith(".mjs") -> "application/javascript"
-            lower.endsWith(".json") -> "application/json"
+            lower.endsWith(".js") -> "application/javascript"
             lower.endsWith(".png") -> "image/png"
             lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".webp") -> "image/webp"
             lower.endsWith(".gif") -> "image/gif"
             lower.endsWith(".svg") -> "image/svg+xml"
-            lower.endsWith(".webp") -> "image/webp"
-            lower.endsWith(".woff2") -> "font/woff2"
-            lower.endsWith(".woff") -> "font/woff"
-            lower.endsWith(".ttf") -> "font/ttf"
-            lower.endsWith(".xml") -> "application/xml"
+            lower.endsWith(".pdf") -> "application/pdf"
+            lower.endsWith(".zip") -> "application/zip"
             else -> "application/octet-stream"
         }
     }
@@ -296,12 +482,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val outDir = File(defaultDir, "exported_logs").also { it.mkdirs() }
             val file = logger.exportTo(outDir, includeAllSessions = includeAll)
             if (file != null) {
-                logger.i("UI", "logs exported: ${file.absolutePath}")
                 _uiState.update {
-                    it.copy(
-                        lastExportPath = file.absolutePath,
-                        toastMessage = "日志已导出：${file.name}"
-                    )
+                    it.copy(lastExportPath = file.absolutePath, toastMessage = "日志已导出：${file.name}")
                 }
             } else {
                 _uiState.update { it.copy(toastMessage = "日志导出失败") }
