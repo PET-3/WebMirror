@@ -218,13 +218,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "html", "htm" -> ResourceCategory.HTML
             "css" -> ResourceCategory.CSS
             "js", "mjs" -> ResourceCategory.JS
+            in listOf("ktx", "ktx2", "basis", "glb", "gltf", "wasm", "bin") -> ResourceCategory.TEXTURE
             else -> ResourceCategory.ALL
         }
+        // For non-image extensions, still select by exact extension match (ids already filtered)
         _uiState.update {
             it.copy(
                 selectedIds = ids,
                 filter = it.filter.copy(
-                    category = if (e in FileTypeFilter.IMAGE_EXTENSIONS) ResourceCategory.IMAGE else cat,
+                    category = cat,
                     imageExtensions = if (e in FileTypeFilter.IMAGE_EXTENSIONS) setOf(e) else emptySet()
                 )
             )
@@ -406,9 +408,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val q = s.resourceQuery.trim().lowercase()
         if (q.isNotEmpty()) {
             list = list.filter {
-                val path = it.localPath.orEmpty().lowercase()
-                path.contains(q) || it.normalizedUrl.lowercase().contains(q) ||
-                    FileTypeFilter.extensionOf(path).contains(q.trimStart('.'))
+                val name = FileTypeFilter.displayName(it.localPath ?: it.url).lowercase()
+                name.contains(q)
             }
         }
         return when (s.resourceSort) {
@@ -742,6 +743,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun logDirSizeBytes(): Long = logger.logDirSizeBytes()
+
+    
+    /** Delete all mirrored files under static/ + browser/ and clear resource DB rows. */
+    fun clearAllDownloads() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                mirrorStaticRoot().deleteRecursively()
+                mirrorBrowserRoot().deleteRecursively()
+                mirrorStaticRoot().mkdirs()
+                mirrorBrowserRoot().mkdirs()
+                repo.resourceDao().deleteAll()
+            }
+            refreshStaging()
+            _uiState.update {
+                it.copy(
+                    selectedIds = emptySet(),
+                    toastMessage = "已清除全部下载内容"
+                )
+            }
+        }
+    }
+
+    /** Remove staging DB records only (keep files) or with files — like log clean. */
+    fun cleanStaging(deleteFiles: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val all = repo.allDownloadedResources()
+            val ids = all.map { it.id }
+            if (deleteFiles) {
+                repo.removeResources(ids, defaultDir, deleteFiles = true)
+                runCatching {
+                    mirrorStaticRoot().deleteRecursively()
+                    mirrorBrowserRoot().deleteRecursively()
+                    mirrorStaticRoot().mkdirs()
+                    mirrorBrowserRoot().mkdirs()
+                }
+            } else {
+                // clear selection bookkeeping: delete DB rows of downloaded so staging empties
+                repo.resourceDao().deleteByIds(ids)
+            }
+            refreshStaging()
+            _uiState.update {
+                it.copy(
+                    selectedIds = emptySet(),
+                    toastMessage = if (deleteFiles) "已清理暂存并删除文件" else "已清空暂存列表（文件仍在磁盘）"
+                )
+            }
+        }
+    }
 
     fun clearAllLogs() {
         logger.clearAll()

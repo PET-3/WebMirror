@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.webmirror"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.10.1-gaps"
+        versionCode = 19
+        versionName = "1.11.0-staging-ui"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -72,6 +72,9 @@ dependencies {
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.18.3")
+
+    // Images
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")

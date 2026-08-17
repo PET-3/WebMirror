@@ -1,6 +1,7 @@
 package com.example.webmirror.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,18 +22,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -51,16 +51,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.webmirror.data.ResourceEntity
 import com.example.webmirror.export.ExportFormat
-import com.example.webmirror.export.ExportProgress
 import com.example.webmirror.export.ExportScope
 import com.example.webmirror.model.FileTypeFilter
 import com.example.webmirror.model.ResourceCategory
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -72,7 +78,6 @@ fun ResourcesScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val filtered = viewModel.filteredResources()
-    // Pin selected to top
     val ordered = remember(filtered, state.selectedIds) {
         val sel = filtered.filter { it.id in state.selectedIds }
         val rest = filtered.filter { it.id !in state.selectedIds }
@@ -83,7 +88,8 @@ fun ResourcesScreen(
     var deletePhysical by remember { mutableStateOf(false) }
     var pendingFormat by remember { mutableStateOf(ExportFormat.ZIP_STORED) }
     var exportName by remember { mutableStateOf("") }
-    var folderPath by remember { mutableStateOf("") } // relative folder prefix for folder view
+    var exportSuffix by remember { mutableStateOf("") }
+    var folderPath by remember { mutableStateOf("") }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -117,13 +123,6 @@ fun ResourcesScreen(
                             contentDescription = "切换视图"
                         )
                     }
-                    IconButton(onClick = { viewModel.toggleSelectAllFiltered() }) {
-                        Icon(
-                            if (viewModel.isAllFilteredSelected()) Icons.Default.CheckBox
-                            else Icons.Default.CheckBoxOutlineBlank,
-                            contentDescription = "全选"
-                        )
-                    }
                     IconButton(
                         onClick = {
                             if (state.selectedIds.isNotEmpty()) {
@@ -132,21 +131,26 @@ fun ResourcesScreen(
                             }
                         }
                     ) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除")
-                    }
-                    IconButton(onClick = {
-                        if (state.selectedIds.isEmpty()) {
-                            viewModel.showToast("请先选择要导出的文件")
-                        } else {
-                            exportName = ""
-                            pendingFormat = ExportFormat.ZIP_STORED
-                            showExportDialog = true
-                        }
-                    }) {
-                        Icon(Icons.Default.Share, contentDescription = "导出")
+                        Icon(Icons.Default.Delete, contentDescription = "删除选中")
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = {
+                    if (state.selectedIds.isEmpty()) {
+                        viewModel.showToast("请先勾选要导出的文件")
+                    } else {
+                        exportName = ""
+                        exportSuffix = ""
+                        pendingFormat = ExportFormat.ZIP_STORED
+                        showExportDialog = true
+                    }
+                }
+            ) {
+                Text("导出", modifier = Modifier.padding(horizontal = 12.dp), fontWeight = FontWeight.SemiBold)
+            }
         }
     ) { padding ->
         Column(
@@ -155,7 +159,6 @@ fun ResourcesScreen(
                 .padding(padding)
                 .padding(horizontal = 12.dp)
         ) {
-            // Source tabs
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("all" to "全部", "static" to "静态", "browser" to "浏览器").forEach { (key, label) ->
                     FilterChip(
@@ -171,23 +174,21 @@ fun ResourcesScreen(
                 value = state.resourceQuery,
                 onValueChange = viewModel::updateResourceQuery,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("搜索") },
+                placeholder = { Text("搜索文件名") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp)
             )
             Spacer(Modifier.height(8.dp))
 
-            // Category chips — click selects all of that type + pin
-            Text("类型（点选即勾选该类）", style = MaterialTheme.typography.labelMedium)
+            Text("类型", style = MaterialTheme.typography.labelMedium)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 ResourceCategory.entries.forEach { cat ->
-                    val selected = state.filter.category == cat
                     FilterChip(
-                        selected = selected,
+                        selected = state.filter.category == cat,
                         onClick = {
                             if (cat == ResourceCategory.ALL) {
                                 viewModel.setCategory(ResourceCategory.ALL)
@@ -200,13 +201,16 @@ fun ResourcesScreen(
                     )
                 }
             }
-            // Extension quick-select (e.g. png → select all png)
+            Spacer(Modifier.height(4.dp))
             Text("扩展名（点选即勾选并置顶）", style = MaterialTheme.typography.labelMedium)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                listOf("png", "jpg", "jpeg", "webp", "gif", "svg", "html", "css", "js", "ktx2", "woff2", "mp4").forEach { ext ->
+                listOf(
+                    "png", "jpg", "jpeg", "webp", "gif", "svg",
+                    "html", "css", "js", "ktx", "ktx2", "glb", "wasm", "woff2", "mp4", "webm"
+                ).forEach { ext ->
                     FilterChip(
                         selected = ext in state.filter.imageExtensions,
                         onClick = { viewModel.selectExtensionAndPin(ext) },
@@ -216,14 +220,22 @@ fun ResourcesScreen(
             }
             Spacer(Modifier.height(8.dp))
 
-            Text(
-                "已选 ${state.selectedIds.size} · 显示 ${ordered.size}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "已选 ${state.selectedIds.size} · 显示 ${ordered.size}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(onClick = { viewModel.toggleSelectAllFiltered() }) {
+                    Text(if (viewModel.isAllFilteredSelected()) "取消全选" else "全选当前")
+                }
+            }
 
             state.exportProgress?.let { prog ->
-                Spacer(Modifier.height(6.dp))
                 LinearProgressIndicator(
                     progress = { if (prog.total > 0) prog.current.toFloat() / prog.total else 0f },
                     modifier = Modifier.fillMaxWidth()
@@ -231,25 +243,31 @@ fun ResourcesScreen(
                 Text(prog.message, style = MaterialTheme.typography.labelSmall)
             }
 
-            Spacer(Modifier.height(8.dp))
+            val mirrorRoot = when (state.stagingSource) {
+                "browser" -> viewModel.mirrorBrowserRoot()
+                "static" -> viewModel.mirrorStaticRoot()
+                else -> viewModel.mirrorRoot()
+            }
 
             if (state.stagingViewMode == "folder") {
                 FolderView(
                     resources = ordered,
                     folderPath = folderPath,
                     selectedIds = state.selectedIds,
+                    mirrorRoot = mirrorRoot,
                     onNavigate = { folderPath = it },
                     onToggle = viewModel::toggleSelection
                 )
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp)
+                    contentPadding = PaddingValues(bottom = 88.dp)
                 ) {
                     items(ordered, key = { it.id }) { res ->
                         ResourceRow(
                             res = res,
                             selected = res.id in state.selectedIds,
+                            mirrorRoot = mirrorRoot,
                             onToggle = { viewModel.toggleSelection(res.id) }
                         )
                     }
@@ -287,20 +305,28 @@ fun ResourcesScreen(
                         singleLine = true,
                         placeholder = { Text("留空则自动命名") }
                     )
+                    OutlinedTextField(
+                        value = exportSuffix,
+                        onValueChange = { exportSuffix = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("自定义后缀（可选）") },
+                        singleLine = true,
+                        placeholder = { Text("例如 _v2 或 -backup") }
+                    )
                 }
             },
             confirmButton = {
                 Button(onClick = {
                     showExportDialog = false
-                    val base = exportName.trim().ifBlank {
-                        "webmirror_export.${pendingFormat.defaultExtension}"
-                    }.let { name ->
-                        val ext = pendingFormat.defaultExtension
-                        if (name.endsWith(".$ext")) name else "$name.$ext"
+                    val ext = pendingFormat.defaultExtension
+                    val suffix = exportSuffix.trim()
+                    val baseName = exportName.trim().ifBlank { "webmirror_export" }
+                    val withSuffix = if (suffix.isEmpty()) baseName else {
+                        if (baseName.endsWith(suffix)) baseName else baseName + suffix
                     }
-                    val mime = pendingFormat.mimeType
+                    val fileName = if (withSuffix.endsWith(".$ext")) withSuffix else "$withSuffix.$ext"
                     viewModel.prepareExport(pendingFormat, ExportScope.SELECTED)
-                    onRequestExportDocument(mime, base)
+                    onRequestExportDocument(pendingFormat.mimeType, fileName)
                 }) { Text("导出") }
             },
             dismissButton = {
@@ -315,9 +341,13 @@ fun ResourcesScreen(
             title = { Text("移除选中项") },
             text = {
                 Column {
-                    Text("从暂存中移除 ${state.selectedIds.size} 项？")
+                    Text("移除 ${state.selectedIds.size} 项？")
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = deletePhysical, onCheckedChange = { deletePhysical = it })
+                        SquareCheck(
+                            checked = deletePhysical,
+                            onToggle = { deletePhysical = !deletePhysical }
+                        )
+                        Spacer(Modifier.width(8.dp))
                         Text("同时删除磁盘文件")
                     }
                 }
@@ -335,34 +365,102 @@ fun ResourcesScreen(
     }
 }
 
+/** Explicit □ / ✓ checkbox so multi-select is obvious. */
+@Composable
+fun SquareCheck(checked: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(24.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .border(
+                width = 2.dp,
+                color = if (checked) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outline,
+                shape = RoundedCornerShape(4.dp)
+            )
+            .background(
+                if (checked) MaterialTheme.colorScheme.primary else Color.Transparent
+            )
+            .clickable(onClick = onToggle),
+        contentAlignment = Alignment.Center
+    ) {
+        if (checked) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
 @Composable
 private fun ResourceRow(
     res: ResourceEntity,
     selected: Boolean,
+    mirrorRoot: File,
     onToggle: () -> Unit
 ) {
     val path = res.localPath ?: res.url
+    val name = FileTypeFilter.displayName(path)
+    val cat = FileTypeFilter.categoryOf(path, res.contentType)
+    val file = res.localPath?.let { File(mirrorRoot, it) }
+
     Row(
         Modifier
             .fillMaxWidth()
             .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
                 else MaterialTheme.colorScheme.surfaceContainerLow,
                 RoundedCornerShape(12.dp)
             )
             .clickable(onClick = onToggle)
-            .padding(12.dp),
+            .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Checkbox(checked = selected, onCheckedChange = { onToggle() })
-        Spacer(Modifier.width(8.dp))
+        SquareCheck(checked = selected, onToggle = onToggle)
+        Spacer(Modifier.width(10.dp))
+
+        // Thumbnail for image / video placeholder
+        Box(
+            Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            when (cat) {
+                ResourceCategory.IMAGE -> {
+                    if (file != null && file.exists()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(file)
+                                .crossfade(true)
+                                .size(96)
+                                .build(),
+                            contentDescription = name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Text("图", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                ResourceCategory.VIDEO -> {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                }
+                else -> {
+                    Text(
+                        FileTypeFilter.extensionOf(path).ifBlank { "?" }.take(4).uppercase(),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                FileTypeFilter.displayName(path),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = FontWeight.Medium
-            )
+            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
             Text(
                 path,
                 style = MaterialTheme.typography.labelSmall,
@@ -385,6 +483,7 @@ private fun FolderView(
     resources: List<ResourceEntity>,
     folderPath: String,
     selectedIds: Set<Long>,
+    mirrorRoot: File,
     onNavigate: (String) -> Unit,
     onToggle: (Long) -> Unit
 ) {
@@ -393,20 +492,16 @@ private fun FolderView(
     val files = mutableListOf<ResourceEntity>()
     resources.forEach { r ->
         val path = (r.localPath ?: return@forEach).trimStart('/')
-        if (!path.startsWith(prefix) && prefix.isNotEmpty()) return@forEach
-        if (prefix.isEmpty() && path.isEmpty()) return@forEach
+        if (prefix.isNotEmpty() && !path.startsWith(prefix)) return@forEach
         val rest = if (prefix.isEmpty()) path else path.removePrefix(prefix)
         val slash = rest.indexOf('/')
-        if (slash >= 0) {
-            folders.add(rest.substring(0, slash))
-        } else if (rest.isNotEmpty()) {
-            files.add(r)
-        }
+        if (slash >= 0) folders.add(rest.substring(0, slash))
+        else if (rest.isNotEmpty()) files.add(r)
     }
 
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(6.dp),
-        contentPadding = PaddingValues(bottom = 24.dp)
+        contentPadding = PaddingValues(bottom = 88.dp)
     ) {
         if (folderPath.isNotEmpty()) {
             item {
@@ -414,8 +509,7 @@ private fun FolderView(
                     Modifier
                         .fillMaxWidth()
                         .clickable {
-                            val parent = folderPath.trim('/').substringBeforeLast('/', "")
-                            onNavigate(parent)
+                            onNavigate(folderPath.trim('/').substringBeforeLast('/', ""))
                         }
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -446,6 +540,7 @@ private fun FolderView(
             ResourceRow(
                 res = res,
                 selected = res.id in selectedIds,
+                mirrorRoot = mirrorRoot,
                 onToggle = { onToggle(res.id) }
             )
         }

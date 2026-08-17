@@ -134,6 +134,9 @@ interface ResourceDao {
     @Query("UPDATE resources SET capture_source = :source WHERE capture_source IS NULL")
     suspend fun tagNullSource(source: String)
 
+
+    @Query("DELETE FROM resources")
+    suspend fun deleteAll()
 }
 
 data class UrlPathPair(

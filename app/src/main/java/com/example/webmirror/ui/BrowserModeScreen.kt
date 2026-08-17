@@ -82,7 +82,6 @@ fun BrowserModeScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = onOpenResources) { Text("暂存") }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
@@ -174,12 +173,20 @@ fun BrowserModeScreen(
                         }
                     )
                     Text(
-                        "提示：进入页面后请尽量加载需要的内容，再点「完成」查看资源暂存。",
+                        "提示：进入页面后请尽量加载需要的内容，再点「完成」。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
+
+            StagingBottomPanel(
+                viewModel = viewModel,
+                source = "browser",
+                title = "浏览器暂存",
+                onOpenFull = onOpenResources
+            )
+            Spacer(Modifier.height(24.dp))
         }
     }
 

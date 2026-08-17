@@ -103,7 +103,6 @@ fun StaticDownloadScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = onOpenResources) { Text("暂存") }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
@@ -401,6 +400,13 @@ fun StaticDownloadScreen(
                     }
                 }
             }
+
+            StagingBottomPanel(
+                viewModel = viewModel,
+                source = "static",
+                title = "静态暂存",
+                onOpenFull = onOpenResources
+            )
 
             Spacer(Modifier.height(24.dp))
         }

@@ -212,6 +212,23 @@ fun SettingsScreen(
                 }
             }
 
+            SettingsSection("存储与暂存") {
+                Text(
+                    "清除下载会删除 static/browser 目录下镜像文件并清空资源库；清理暂存可只清空列表。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(onClick = { viewModel.cleanStaging(deleteFiles = false) }) {
+                    Text("清理暂存列表（保留文件）")
+                }
+                OutlinedButton(onClick = { viewModel.cleanStaging(deleteFiles = true) }) {
+                    Text("清理暂存并删除文件")
+                }
+                OutlinedButton(onClick = { viewModel.clearAllDownloads() }) {
+                    Text("清除所有下载内容")
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
         }
     }

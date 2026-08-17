@@ -14,6 +14,7 @@ enum class ResourceCategory(val label: String) {
     AUDIO("音频"),
     VIDEO("视频"),
     PDF("PDF"),
+    TEXTURE("纹理/3D"),
     OTHER("其他")
 }
 
@@ -59,6 +60,8 @@ data class FileTypeFilter(
                 ext in listOf("mp3", "wav", "ogg", "m4a", "flac", "aac") || ct.startsWith("audio/") -> ResourceCategory.AUDIO
                 ext in listOf("mp4", "webm", "mkv", "mov", "m4v") || ct.startsWith("video/") -> ResourceCategory.VIDEO
                 ext == "pdf" || ct.contains("pdf") -> ResourceCategory.PDF
+                ext in listOf("ktx", "ktx2", "basis", "dds", "glb", "gltf", "hdr", "exr", "wasm", "bin") ->
+                    ResourceCategory.TEXTURE
                 else -> ResourceCategory.OTHER
             }
         }
