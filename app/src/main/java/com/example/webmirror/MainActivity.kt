@@ -1,10 +1,12 @@
 package com.example.webmirror
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,10 +21,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.example.webmirror.ui.BrowserCaptureScreen
-import com.example.webmirror.ui.HomeScreen
+import com.example.webmirror.ui.BrowserModeScreen
 import com.example.webmirror.ui.MainViewModel
+import com.example.webmirror.ui.ModeHomeScreen
 import com.example.webmirror.ui.ResourcesScreen
+import com.example.webmirror.ui.SettingsScreen
+import com.example.webmirror.ui.StaticDownloadScreen
 import com.example.webmirror.ui.theme.WebMirrorTheme
+import com.example.webmirror.util.StoragePaths
 
 class MainActivity : ComponentActivity() {
 
@@ -35,13 +41,14 @@ class MainActivity : ComponentActivity() {
             try {
                 contentResolver.takePersistableUriPermission(
                     uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
             } catch (_: SecurityException) {
             }
             val name = uri.lastPathSegment?.substringAfterLast(':') ?: uri.toString()
-            viewModel.setTreeUri(uri, "用户选择: $name")
+            viewModel.setTreeUri(uri, "自定义：$name")
+            viewModel.showToast("已选择保存位置")
         }
     }
 
@@ -50,6 +57,21 @@ class MainActivity : ComponentActivity() {
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.startExportToUri(uri)
+        }
+    }
+
+    private val storagePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val ok = result.values.any { it }
+        if (ok || hasLegacyWrite()) {
+            val dir = StoragePaths.defaultPublicDownloadDir()
+            dir.mkdirs()
+            StoragePaths.setDownloadDir(this, dir.absolutePath)
+            viewModel.refreshDownloadDir()
+            viewModel.showToast("已使用 ${dir.absolutePath}")
+        } else {
+            viewModel.showToast("未授予存储权限，将使用应用私有目录")
         }
     }
 
@@ -69,46 +91,112 @@ class MainActivity : ComponentActivity() {
                         "resources" -> ResourcesScreen(
                             viewModel = viewModel,
                             onBack = { screen = "home" },
-                            onRequestExportDocument = { mime, name ->
+                            onRequestExportDocument = { _, name ->
                                 createDocumentLauncher.launch(name)
                             }
                         )
-                        "browser" -> {
+                        "settings" -> SettingsScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = "home" },
+                            onPickSaveDirectory = { openTreeLauncher.launch(null) },
+                            onRequestStoragePermission = { requestStoragePermission() }
+                        )
+                        "static" -> StaticDownloadScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = "home" },
+                            onOpenResources = {
+                                viewModel.refreshStaging()
+                                screen = "resources"
+                            },
+                            onOpenSettings = { screen = "settings" }
+                        )
+                        "browser_setup" -> BrowserModeScreen(
+                            viewModel = viewModel,
+                            onBack = { screen = "home" },
+                            onStartCapture = { screen = "browser_capture" },
+                            onOpenSettings = { screen = "settings" }
+                        )
+                        "browser_capture" -> {
                             val state = viewModel.uiState.value
                             BrowserCaptureScreen(
                                 startUrl = state.url,
                                 outputDir = viewModel.mirrorRoot(),
                                 sameHostOnly = state.sameDomainOnly,
-                                onClose = { screen = "home" },
+                                onClose = { screen = "browser_setup" },
                                 onFinished = { count ->
                                     viewModel.onBrowserCaptureFinished(count)
-                                    screen = "home"
+                                    screen = "resources"
                                 },
                                 onResourceSaved = { url, bytes ->
                                     viewModel.recordCapturedResource(url, bytes)
                                 }
                             )
                         }
-                        else -> HomeScreen(
+                        else -> ModeHomeScreen(
                             viewModel = viewModel,
-                            onPickDirectory = { openTreeLauncher.launch(null) },
+                            onOpenStatic = { screen = "static" },
+                            onOpenBrowser = { screen = "browser_setup" },
                             onOpenResources = {
                                 viewModel.refreshStaging()
                                 screen = "resources"
                             },
-                            onOpenBrowserCapture = {
-                                val u = viewModel.uiState.value.url.trim()
-                                if (u.isBlank()) {
-                                    viewModel.showToast("请先输入网站 URL")
-                                } else {
-                                    screen = "browser"
-                                }
-                            }
+                            onOpenSettings = { screen = "settings" }
                         )
                     }
                 }
             }
         }
+    }
+
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            if (Environment.isExternalStorageManager()) {
+                val dir = StoragePaths.defaultPublicDownloadDir()
+                dir.mkdirs()
+                StoragePaths.setDownloadDir(this, dir.absolutePath)
+                viewModel.refreshDownloadDir()
+                viewModel.showToast("已可访问 ${dir.absolutePath}")
+            } else {
+                val perms = mutableListOf<String>()
+                if (Build.VERSION.SDK_INT <= 32) {
+                    perms += Manifest.permission.READ_EXTERNAL_STORAGE
+                    perms += Manifest.permission.WRITE_EXTERNAL_STORAGE
+                }
+                if (perms.isNotEmpty()) {
+                    storagePermissionLauncher.launch(perms.toTypedArray())
+                } else {
+                    val dir = StoragePaths.defaultPublicDownloadDir()
+                    val ok = runCatching {
+                        dir.mkdirs()
+                        val probe = java.io.File(dir, ".wm_write_test")
+                        probe.writeText("ok")
+                        probe.delete()
+                        true
+                    }.getOrDefault(false)
+                    if (ok) {
+                        StoragePaths.setDownloadDir(this, dir.absolutePath)
+                        viewModel.refreshDownloadDir()
+                        viewModel.showToast("已使用 ${dir.absolutePath}")
+                    } else {
+                        viewModel.showToast("请使用「更改位置」选择可写文件夹")
+                        openTreeLauncher.launch(null)
+                    }
+                }
+            }
+        } else {
+            storagePermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                )
+            )
+        }
+    }
+
+    private fun hasLegacyWrite(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this, Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun requestNotificationPermissionIfNeeded() {

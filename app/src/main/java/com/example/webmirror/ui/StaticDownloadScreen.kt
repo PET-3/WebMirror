@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
@@ -63,11 +64,10 @@ import com.example.webmirror.engine.model.RunMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(
+fun StaticDownloadScreen(
     viewModel: MainViewModel,
-    onPickDirectory: () -> Unit = {},
+    onBack: () -> Unit = {},
     onOpenResources: () -> Unit = {},
-    onOpenBrowserCapture: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -91,7 +91,12 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("WebMirror", fontWeight = FontWeight.SemiBold)
+                    Text("静态下载", fontWeight = FontWeight.SemiBold)
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
                 },
                 actions = {
                     IconButton(onClick = onOpenSettings) {
@@ -142,34 +147,18 @@ fun HomeScreen(
                         shape = RoundedCornerShape(12.dp)
                     )
 
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    Button(
+                        onClick = {
+                            focusManager.clearFocus()
+                            viewModel.startDownload(RunMode.FRESH)
+                        },
+                        enabled = !isDownloading && state.url.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                focusManager.clearFocus()
-                                viewModel.startDownload(RunMode.FRESH)
-                            },
-                            enabled = !isDownloading && state.url.isNotBlank(),
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Download, null, Modifier.size(18.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text("开始下载")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                focusManager.clearFocus()
-                                onOpenBrowserCapture()
-                            },
-                            enabled = !isDownloading && state.url.isNotBlank(),
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("浏览器捕获")
-                        }
+                        Icon(Icons.Default.Download, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text("开始下载")
                     }
 
                     AnimatedVisibility(visible = isDownloading) {

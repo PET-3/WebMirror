@@ -9,6 +9,8 @@ import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.webmirror.data.AppPreferences
+import com.example.webmirror.data.DefaultSaveFormat
 import com.example.webmirror.data.MirrorRepository
 import com.example.webmirror.data.ResourceEntity
 import com.example.webmirror.engine.EngineStats
@@ -36,6 +38,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.webmirror.util.StoragePaths
 import java.io.File
 
 data class UiState(
@@ -57,18 +60,36 @@ data class UiState(
     val filter: FileTypeFilter = FileTypeFilter(),
     val resourceQuery: String = "",
     val resourceSort: ResourceSort = ResourceSort.TIME_DESC,
-    val exportProgress: ExportProgress? = null
+    val exportProgress: ExportProgress? = null,
+    // Settings
+    val defaultSaveFormat: DefaultSaveFormat = DefaultSaveFormat.FOLDER,
+    val saveLocationDisplay: String = "",
+    val autoCleanLogs: Boolean = true,
+    val logRetentionDays: Int = 7
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repo = MirrorRepository(application)
     private val logger = MirrorLogger.get(application)
-    private val defaultDir = getDefaultDownloadDir()
+    private val prefs = AppPreferences(application)
+    private var defaultDir: File = StoragePaths.getDownloadDir(application)
     private val exportManager = ExportManager.createDefault()
 
     private val _uiState = MutableStateFlow(
-        UiState(downloadDirDisplay = defaultDir.absolutePath)
+        UiState(
+            downloadDirDisplay = defaultDir.absolutePath,
+            maxDepth = prefs.maxDepth,
+            maxWorkers = prefs.maxWorkers,
+            sameDomainOnly = prefs.sameDomainOnly,
+            rewriteLinks = prefs.rewriteLinks,
+            respectRobots = prefs.respectRobots,
+            defaultSaveFormat = prefs.defaultSaveFormat,
+            autoCleanLogs = prefs.autoCleanLogs,
+            logRetentionDays = prefs.logRetentionDays,
+            saveLocationDisplay = resolveSaveLocationLabel(),
+            treeUri = prefs.resolvedTreeUri()
+        )
     )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
@@ -79,6 +100,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var pendingExportScope: ExportScope = ExportScope.SELECTED
 
     init {
+        refreshDownloadDir()
+        runLogAutoCleanIfEnabled()
         viewModelScope.launch {
             repo.stats.collect { stats ->
                 _uiState.update { it.copy(stats = stats) }
@@ -101,18 +124,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateUrl(url: String) = _uiState.update { it.copy(url = url) }
-    fun updateMaxDepth(depth: Int) = _uiState.update { it.copy(maxDepth = depth.coerceAtLeast(0)) }
-    fun updateMaxWorkers(n: Int) = _uiState.update { it.copy(maxWorkers = n.coerceIn(1, 16)) }
-    fun updateSameDomainOnly(v: Boolean) = _uiState.update { it.copy(sameDomainOnly = v) }
-    fun updateRewriteLinks(v: Boolean) = _uiState.update { it.copy(rewriteLinks = v) }
-    fun updateRespectRobots(v: Boolean) = _uiState.update { it.copy(respectRobots = v) }
+    fun updateMaxDepth(depth: Int) {
+        val d = depth.coerceAtLeast(0)
+        prefs.maxDepth = d
+        _uiState.update { it.copy(maxDepth = d) }
+    }
+    fun updateMaxWorkers(n: Int) {
+        val w = n.coerceIn(1, 16)
+        prefs.maxWorkers = w
+        _uiState.update { it.copy(maxWorkers = w) }
+    }
+    fun updateSameDomainOnly(v: Boolean) {
+        prefs.sameDomainOnly = v
+        _uiState.update { it.copy(sameDomainOnly = v) }
+    }
+    fun updateRewriteLinks(v: Boolean) {
+        prefs.rewriteLinks = v
+        _uiState.update { it.copy(rewriteLinks = v) }
+    }
+    fun updateRespectRobots(v: Boolean) {
+        prefs.respectRobots = v
+        _uiState.update { it.copy(respectRobots = v) }
+    }
 
     fun setTreeUri(uri: Uri?, displayName: String) {
+        prefs.saveTreeUri = uri?.toString()
         _uiState.update {
             it.copy(
                 treeUri = uri,
                 treeDisplayName = if (uri != null) displayName else null,
-                downloadDirDisplay = defaultDir.absolutePath
+                downloadDirDisplay = defaultDir.absolutePath,
+                saveLocationDisplay = if (uri != null) displayName else prefs.defaultPublicDir().absolutePath
             )
         }
     }
@@ -548,7 +590,115 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+
+    fun refreshDownloadDir() {
+        defaultDir = StoragePaths.getDownloadDir(getApplication())
+        defaultDir.mkdirs()
+        _uiState.update {
+            it.copy(
+                downloadDirDisplay = defaultDir.absolutePath,
+                saveLocationDisplay = defaultDir.absolutePath
+            )
+        }
+    }
+
+    fun setCustomDownloadDir(path: String) {
+        StoragePaths.setDownloadDir(getApplication(), path)
+        refreshDownloadDir()
+        showToast("下载目录已更新")
+    }
+
+    fun resetDownloadDirToDefault() {
+        StoragePaths.setDownloadDir(getApplication(), null)
+        // Prefer public Download/WebMirror
+        val pub = StoragePaths.defaultPublicDownloadDir()
+        try {
+            pub.mkdirs()
+            StoragePaths.setDownloadDir(getApplication(), pub.absolutePath)
+        } catch (_: Exception) {
+        }
+        refreshDownloadDir()
+        showToast("已恢复默认 Download/WebMirror")
+    }
+
+    fun isLogAutoCleanEnabled(): Boolean =
+        StoragePaths.isLogAutoCleanEnabled(getApplication())
+
+    fun setLogAutoCleanEnabled(v: Boolean) {
+        StoragePaths.setLogAutoCleanEnabled(getApplication(), v)
+    }
+
+    fun logKeepDays(): Int = StoragePaths.logKeepDays(getApplication())
+
+    fun setLogKeepDays(days: Int) {
+        StoragePaths.setLogKeepDays(getApplication(), days)
+    }
+
+    fun logDirSizeBytes(): Long = logger.logDirSizeBytes()
+
+    fun clearAllLogs() {
+        logger.clearAll()
+        showToast("日志已清空")
+    }
+
+    fun runLogAutoCleanIfEnabled() {
+        if (!StoragePaths.isLogAutoCleanEnabled(getApplication())) return
+        val n = logger.autoClean(StoragePaths.logKeepDays(getApplication()))
+        if (n > 0) logger.i("Log", "auto-clean deleted $n files")
+    }
+
+
+    private fun resolveSaveLocationLabel(): String {
+        return StoragePaths.getDownloadDir(getApplication()).absolutePath
+    }
+
+    fun setDefaultSaveFormat(format: DefaultSaveFormat) {
+        prefs.defaultSaveFormat = format
+        _uiState.update { it.copy(defaultSaveFormat = format) }
+    }
+
+    fun setAutoCleanLogs(v: Boolean) {
+        prefs.autoCleanLogs = v
+        StoragePaths.setLogAutoCleanEnabled(getApplication(), v)
+        _uiState.update { it.copy(autoCleanLogs = v) }
+    }
+
+    fun setLogRetentionDays(days: Int) {
+        prefs.logRetentionDays = days
+        StoragePaths.setLogKeepDays(getApplication(), days)
+        _uiState.update { it.copy(logRetentionDays = prefs.logRetentionDays) }
+    }
+
+    fun resetSaveLocationToDefault() {
+        prefs.saveTreeUri = null
+        StoragePaths.setDownloadDir(getApplication(), null)
+        refreshDownloadDir()
+        _uiState.update {
+            it.copy(
+                treeUri = null,
+                treeDisplayName = null,
+                saveLocationDisplay = resolveSaveLocationLabel()
+            )
+        }
+    }
+
+    fun cleanLogsNow() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val n = logger.autoClean(prefs.logRetentionDays)
+            _uiState.update { it.copy(toastMessage = "已清理 $n 个过期日志") }
+        }
+    }
+
+    fun runStartupMaintenance() {
+        if (!prefs.autoCleanLogs) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { logger.autoClean(prefs.logRetentionDays) }
+        }
+    }
+
     private fun getDefaultDownloadDir(): File {
+        // Working cache always under app-specific dir (reliable).
+        // User-facing "save location" is public Download/WebMirror or SAF (settings).
         val app = getApplication<Application>()
         val external = app.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
         return if (external != null) {
@@ -557,4 +707,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             File(app.filesDir, "WebMirror").also { it.mkdirs() }
         }
     }
+
+    /** User-visible save root for finished exports / folder copies. */
+    fun userSaveDir(): File = prefs.defaultPublicDir()
+
 }

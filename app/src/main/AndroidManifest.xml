@@ -25,6 +25,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.WebMirror"
         android:usesCleartextTraffic="true"
+        android:requestLegacyExternalStorage="true"
         tools:targetApi="35">
         <activity
             android:name=".MainActivity"
