@@ -142,6 +142,27 @@ class MirrorLogger private constructor(context: Context) {
         }
     }
 
+    /**
+     * Delete log files older than [keepDays]. Always keeps the current session file.
+     * @return number of deleted files
+     */
+    fun autoClean(keepDays: Int = 7): Int {
+        val cutoff = System.currentTimeMillis() - keepDays.coerceAtLeast(1) * 24L * 3600_000L
+        var deleted = 0
+        lock.withLock {
+            for (f in listLogFiles()) {
+                if (f.absolutePath == sessionFile.absolutePath) continue
+                if (f.lastModified() < cutoff) {
+                    if (f.delete()) deleted++
+                }
+            }
+        }
+        return deleted
+    }
+
+    fun logDirSizeBytes(): Long =
+        listLogFiles().sumOf { it.length() }
+
     companion object {
         @Volatile private var instance: MirrorLogger? = null
 
